@@ -1,10 +1,11 @@
+
 const logger = require('./logger');
 
 const errorHandler = (err, req, res, next) => {
     const statusCode = err.statusCode || 500;
     const serviceName = err.service || 'intellishop';
     const message = err.message || 'An unexpected error occurred';
-    
+
     const userId = (req.session && req.session.user && (req.session.user.id || req.session.user._id)) || null;
     const routePath = (req.route && req.route.path) ? req.route.path : req.originalUrl;
 

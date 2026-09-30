@@ -12,10 +12,15 @@ const errorHandler = require("./middleware/errorHandler");
 const requestContext = require("./middleware/requestContext");
 const requestLogger = require("./middleware/requestLogger");
 
+// Metrics
+const databaseMetricsPlugin = require("./metrics/databaseMetrics");
+const metrics = require("./metrics/metrics");
+mongoose.plugin(databaseMetricsPlugin);
 // Routers
 const userRouter = require("./routes/userRouter");
 const authRouter = require("./routes/authRouter");
 const hostRouter = require("./routes/hostRouter");
+const intellitraceRouter = require("./routes/intellitraceRouter");
 
 // REST API Routers
 const userApiRouter = require("./routes/api/userApiRouter");
@@ -25,6 +30,8 @@ const orderApiRouter = require("./routes/api/orderApiRouter");
 const paymentApiRouter = require("./routes/api/paymentApiRouter");
 const notificationApiRouter = require("./routes/api/notificationApiRouter");
 const failureApiRouter = require("./routes/api/failureApiRouter");
+const { isContext } = require('vm');
+const { Timestamp } = require('mongodb');
 
 const app = express();
 
@@ -118,6 +125,38 @@ app.use(authRouter);
 app.use(userRouter);
 app.use("/host", hostRouter);
 app.use("/admin", hostRouter);
+app.use("/intellitrace", intellitraceRouter);
+
+//Health Check Endpoint
+app.get('/health', (req, res) => {
+    const isDbConnected = mongoose.connection.readyState === 1;
+    if (isDbConnected) {
+        res.status(200).json({
+            status: "healthy",
+            service: "intellishop",
+            timestamp: new Date().toISOString(),
+            uptime: process.uptime(),
+            database: "connected"
+        });
+    } else {
+        res.status(503).json({
+            status: "unhealthy",
+            service: "intellishop",
+            database: "disconnected"
+        });
+    }
+});
+
+// Metrics Endpoint
+app.get('/metrics', (req, res) => {
+    res.status(200).json(metrics.getMetrics());
+});
+
+// Development Failure Simulation Endpoints
+if (process.env.NODE_ENV !== 'production') {
+    const debugRouter = require('./routes/debugRouter');
+    app.use('/debug', debugRouter);
+}
 
 // 404 Page Not Found Handler
 app.use((req, res, next) => {
@@ -134,10 +173,10 @@ app.use(errorHandler);
 
 // Database Connection & Server Listener
 mongoose.connect(DB_Path).then(() => {
-    logger.info("Connected to MongoDB database: ecommerce");
+    logger.info("MongoDB connected");
     app.listen(PORT, () => {
         logger.info(`IntelliShop Server running on http://localhost:${PORT}`);
     });
 }).catch(err => {
-    logger.error("Error while connecting to MongoDB:", { error: err.message });
+    logger.error("MongoDB connection failed", { error: err.message, stack: err.stack });
 });

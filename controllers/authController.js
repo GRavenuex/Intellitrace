@@ -114,7 +114,10 @@ exports.postLogin = async (req, res, next) => {
     try {
         const user = await User.findOne({ email });
         if (!user) {
-            logger.warn(`Login failed - user not found: ${email}`);
+            logger.warn("Login failed - user not found", {
+                requestId: req.requestId,
+                email: email
+            });
             return res.status(422).render("auth/login", {
                 pageTitle: "Login - IntelliShop",
                 currentPage: "login",
@@ -127,7 +130,10 @@ exports.postLogin = async (req, res, next) => {
 
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) {
-            logger.warn(`Login failed - invalid password for: ${email}`);
+            logger.warn("Login failed - invalid password", {
+                requestId: req.requestId,
+                userId: user._id.toString()
+            });
             return res.status(422).render("auth/login", {
                 pageTitle: "Login - IntelliShop",
                 currentPage: "login",
@@ -146,7 +152,10 @@ exports.postLogin = async (req, res, next) => {
             userType: user.userType
         };
 
-        logger.info(`User login successful: ${email}`);
+        logger.info("Login successful", {
+            requestId: req.requestId,
+            userId: user._id.toString()
+        });
         res.redirect("/");
     } catch (err) {
         logger.error("Login server error", { error: err.message });
@@ -155,12 +164,19 @@ exports.postLogin = async (req, res, next) => {
 };
 
 exports.postLogout = (req, res, next) => {
-    const email = req.session.user ? req.session.user.email : 'Unknown';
+    const userId = req.session.user ? req.session.user.id : undefined;
     req.session.destroy((err) => {
         if (err) {
-            logger.error("Logout error", { error: err.message });
+            logger.error("Logout error", { 
+                requestId: req.requestId,
+                userId: userId,
+                error: err.message 
+            });
         } else {
-            logger.info(`User logout successful: ${email}`);
+            logger.info("Logout successful", {
+                requestId: req.requestId,
+                userId: userId
+            });
         }
         res.redirect("/login");
     });

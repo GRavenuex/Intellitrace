@@ -1,4 +1,5 @@
 const logger = require('./logger');
+const metrics = require('../metrics/metrics');
 
 const requestLogger = (req, res, next) => {
     res.on("finish", () => {
@@ -34,6 +35,9 @@ const requestLogger = (req, res, next) => {
         } else {
             logger.info(message, logMeta);
         }
+
+        // Record metrics
+        metrics.recordRequest(res.statusCode, responseTime, routePath);
     });
     
     next();

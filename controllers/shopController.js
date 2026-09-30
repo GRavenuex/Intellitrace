@@ -57,7 +57,10 @@ exports.getProducts = async (req, res, next) => {
         const products = await Product.find(query).sort(sortOption);
         const categories = ['Laptops', 'Smartphones', 'Headphones', 'Keyboards', 'Mice', 'Monitors', 'Accessories'];
 
-        logger.info("Products fetched", { count: products.length, query: req.query });
+        logger.info("Products fetched", { 
+            requestId: req.requestId, 
+            count: products.length 
+        });
 
         res.render('store/products', {
             pageTitle: 'Browse Products - IntelliShop',
@@ -73,7 +76,11 @@ exports.getProducts = async (req, res, next) => {
             user: req.session.user
         });
     } catch (err) {
-        logger.error("Error fetching product catalog", { error: err.message });
+        logger.error("Product query failure", { 
+            requestId: req.requestId, 
+            error: err.message, 
+            stack: err.stack 
+        });
         next(err);
     }
 };
@@ -84,7 +91,10 @@ exports.getProductDetails = async(req , res ,  next)=>{
         const productId = req.params.id;
         const product  = await Product.findById(productId);
         if(!product){
-            logger.warn("product not found",{productId});
+            logger.warn("Product not found", {
+                requestId: req.requestId,
+                productId
+            });
             return res.redirect('/products');
         }
         const relatedProducts = await Product.find({
@@ -93,7 +103,10 @@ exports.getProductDetails = async(req , res ,  next)=>{
 
         }).limit(4);
 
-        logger.info(`product fatched:${product.name}` , {productId});
+        logger.info("Product fetched", { 
+            requestId: req.requestId, 
+            productId 
+        });
         res.render('store/product-detail',{
             pageTitle: `${product.name} - intellishop`,
             currentPage  :'products',
@@ -104,7 +117,12 @@ exports.getProductDetails = async(req , res ,  next)=>{
         });
 
     }catch(err){
-        logger.error("Error fetching prduct details",{error:err.message});
+        logger.error("Product query failure", {
+            requestId: req.requestId,
+            productId: req.params.id,
+            error: err.message,
+            stack: err.stack
+        });
         next(err);
 
     }
@@ -121,6 +139,11 @@ exports.getCart = async(req ,res , next )=> {
             cart  = new Cart({userId , items :[], totalAmount:0});
             await cart.save();
         }
+        
+        logger.info("Cart retrieved", {
+            requestId: req.requestId,
+            userId
+        });
         res.render('store/cart' , {
             pageTitle: 'Your shopping Cart - intellishop',
             currentPage:'cart',
@@ -131,7 +154,13 @@ exports.getCart = async(req ,res , next )=> {
 
 
     }catch(err){
-        logger.error("erorr fetching cart" ,({error : err.message}));
+        logger.error("Cart operation failure", {
+            requestId: req.requestId,
+            userId: req.session?.user?.id,
+            operation: "getCart",
+            error: err.message,
+            stack: err.stack
+        });
         next(err);
     }
 
@@ -166,12 +195,23 @@ exports.postAddToCart = async (req, res , next)=>{
             cart.calculateTotal();
             await cart.save();
 
-            logger.info("product added to cart",{userId , productId  ,quantity });
+            logger.info("Product added to cart", {
+                requestId: req.requestId,
+                userId, 
+                productId,  
+                quantity 
+            });
             res.redirect('/cart');
         }
 
     }catch(err){
-        logger.error("Error Adding product to cart", {error: err.message});
+        logger.error("Cart operation failure", {
+            requestId: req.requestId,
+            userId: req.session?.user?.id,
+            operation: "postAddToCart",
+            error: err.message,
+            stack: err.stack
+        });
         next(err);
 
     }
@@ -199,10 +239,21 @@ exports.postUpdateCart = async(req , res , next)=>{
             cart.calculateTotal();
             await cart.save();
         }
-        logger.info("cart Updated" , { userId,productId , quantity});
+        logger.info("Cart updated", { 
+            requestId: req.requestId,
+            userId,
+            productId, 
+            quantity
+        });
         res.redirect('/cart');
-    }catch{
-        logger.error("error while updating cart" , {error:err.message});
+    }catch(err){
+        logger.error("Cart operation failure", {
+            requestId: req.requestId,
+            userId: req.session?.user?.id,
+            operation: "postUpdateCart",
+            error: err.message,
+            stack: err.stack
+        });
         next(err);
     }
 };
@@ -218,12 +269,22 @@ exports.postRemoveFromCart = async (req, res, next) => {
             cart.items = cart.items.filter(item => item.productId.toString() !== productId);
             cart.calculateTotal();
             await cart.save();
-            logger.info("Product removed from cart", { userId, productId });
+            logger.info("Product removed from cart", { 
+                requestId: req.requestId,
+                userId, 
+                productId 
+            });
         }
 
         res.redirect('/cart');
     } catch (err) {
-        logger.error("Error removing item from cart", { error: err.message });
+        logger.error("Cart operation failure", { 
+            requestId: req.requestId,
+            userId: req.session?.user?.id,
+            operation: "postRemoveFromCart",
+            error: err.message,
+            stack: err.stack 
+        });
         next(err);
     }
 };
@@ -258,6 +319,11 @@ exports.postCreateOrder = async (req, res, next) => {
         const userId = req.session.user.id;
         const { fullName, address, city, state, pincode, phone } = req.body;
 
+        logger.info("Order creation started", {
+            requestId: req.requestId,
+            userId
+        });
+
         const cart = await Cart.findOne({ userId }).populate('items.productId');
         if (!cart || cart.items.length === 0) {
             return res.redirect('/cart');
@@ -281,11 +347,20 @@ exports.postCreateOrder = async (req, res, next) => {
         });
 
         await order.save();
-        logger.info("Order created successfully", { orderId: order._id, userId, amount: order.totalAmount });
+        logger.info("Order created", { 
+            requestId: req.requestId,
+            userId,
+            orderId: order._id
+        });
 
         res.redirect(`/payment/${order._id}`);
     } catch (err) {
-        logger.error("Error creating order", { error: err.message });
+        logger.error("Order creation failed", { 
+            requestId: req.requestId,
+            userId: req.session?.user?.id,
+            error: err.message,
+            stack: err.stack 
+        });
         next(err);
     }
 };
@@ -326,12 +401,19 @@ exports.postProcessPayment = async (req, res, next) => {
             return res.redirect('/orders');
         }
 
-        logger.info("Payment started", { orderId, amount: order.totalAmount, simulatedResult: paymentResult });
+        logger.info("Payment started", { 
+            requestId: req.requestId,
+            orderId 
+        });
 
         const transactionId = 'TXN-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
 
         if (paymentResult === 'FAILURE') {
-            logger.error("Payment failed", { orderId, reason: "Simulated payment transaction failure" });
+            logger.error("Payment failed", { 
+                requestId: req.requestId,
+                orderId, 
+                error: "Simulated payment transaction failure" 
+            });
 
             const payment = new Payment({
                 orderId: order._id,
@@ -384,11 +466,19 @@ exports.postProcessPayment = async (req, res, next) => {
         });
         await notification.save();
 
-        logger.info("Payment successful", { orderId, transactionId });
+        logger.info("Payment successful", { 
+            requestId: req.requestId,
+            orderId 
+        });
 
         res.redirect(`/order-confirmation/${order._id}`);
     } catch (err) {
-        logger.error("Error processing payment", { error: err.message });
+        logger.error("Payment processing error", { 
+            requestId: req.requestId,
+            orderId: req.body?.orderId,
+            error: err.message,
+            stack: err.stack 
+        });
         next(err);
     }
 };

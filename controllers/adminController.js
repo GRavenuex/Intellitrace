@@ -12,6 +12,12 @@ exports.getDashboard = async (req , res , next)=>{
         const totalOrders = await Order.countDocuments();
         const totalUsers = await User.countDocuments();
         const recentOrders = await Order.find().sort({createdAt:-1}).limit(5).populate('userId','email firstName lastName');
+
+        logger.info("Admin dashboard accessed", {
+            requestId: req.requestId,
+            userId: req.session?.user?.id
+        });
+
         res.render('admin/dashboard' , {
             pageTitle:'Admin Dashboard - Intellishop',
             currentPage:'admin',
@@ -82,7 +88,11 @@ exports.postAddProduct = async (req, res, next) => {
         });
 
         await product.save();
-        logger.info(`Product created: ${name}`, { productId: product._id });
+        logger.info("Product created", { 
+            requestId: req.requestId,
+            userId: req.session?.user?.id,
+            productId: product._id 
+        });
         res.redirect('/admin/products');
     } catch (err) {
         logger.error("Error adding new product", { error: err.message });
@@ -141,7 +151,11 @@ exports.postEditProduct = async (req, res, next) => {
         }
 
         await product.save();
-        logger.info(`Product updated: ${name}`, { productId: id });
+        logger.info("Product updated", { 
+            requestId: req.requestId,
+            userId: req.session?.user?.id,
+            productId: id 
+        });
         res.redirect('/admin/products');
     } catch (err) {
         logger.error("Error updating product", { error: err.message });
@@ -154,7 +168,11 @@ exports.postDeleteProduct = async (req, res, next) => {
     try {
         const productId = req.params.id || req.body.id;
         await Product.findByIdAndDelete(productId);
-        logger.info(`Product deleted`, { productId });
+        logger.info("Product deleted", { 
+            requestId: req.requestId,
+            userId: req.session?.user?.id,
+            productId 
+        });
         res.redirect('/admin/products');
     } catch (err) {
         logger.error("Error deleting product", { error: err.message });
