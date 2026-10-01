@@ -1,0 +1,88 @@
+
+<%-include('../partials/head')%>
+</head>
+<body class="bg-gray-100 font-sans m-0 p-0">
+
+
+<%-include('../partials/nav')%>
+
+
+    <!-- Main Content -->
+    <main class="max-w-lg mx-auto mt-10 bg-white shadow-lg rounded-lg p-8">
+
+        <h2 class="text-3xl font-bold text-gray-800 text-center mb-8"><%= editing ? "Edit":"Register"%>
+             Your Home on Airbnb
+        </h2>
+
+        <form action="/host/<%=editing ? "edit-home" :"add-home"%>" method="POST" enctype="multipart/form-data" class="space-y-6">
+
+            <input type="hidden", name="id"
+            value="<%= editing ? home._id: ''%>"
+            />
+
+            <div>
+                <!-- <label for="name" class="block text-gray-700 font-semibold mb-2">
+                    House Name
+                </label> -->
+
+                <input
+                    type="text"
+                    id="houseName"
+                    name="houseName"
+                      value="<%= editing ? home.houseName :''%>"
+                    placeholder="Enter your house name"
+                    class="w-full border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-rose-500 focus:border-transparent"/>
+                    
+               
+                    <input
+                    type="text"
+                    name="location"
+                     value="<%= editing ? home.location :''%>"
+                    placeholder="Location"
+                    class="w-full border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-rose-500 focus:border-transparent"/>
+
+                    
+                    <input
+                    type="text"
+                    name="rating"
+                     value="<%= editing ? home.rating :''%>"
+                    placeholder="Rating"
+                    class="w-full border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-rose-500 focus:border-transparent"/>
+
+                    <input
+                    type="text"
+                    id="price"
+                    name="price"
+                     value="<%= editing ? home.price :''%>"
+                    placeholder="price per night"
+                    class="w-full border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-rose-500 focus:border-transparent"/>
+
+                    <input
+                    type="file"
+                    name="photo"
+                    accept="image/jpg ,image/jpeg, image/png"
+                     value="<%= editing ? home.photo :''%>"
+                    placeholder="Enter photo URL"
+                    class="w-full border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-rose-500 focus:border-transparent"/>
+
+                   <textarea
+                    name="description"
+                    placeholder="Describe your home"
+                    class="w-full border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-rose-500 focus:border-transparent"
+                    ><%= editing ? home.description : '' %></textarea>
+
+            </div>
+
+            <input
+                type="submit" value="<%= editing ? "Update Home":"add Home" %>"
+                class="w-full bg-rose-500 text-white font-semibold py-3 rounded-lg hover:bg-rose-600 transition duration-300 shadow-md"
+            
+             
+            />
+
+        </form>
+
+    </main>
+
+</body>
+</html>

@@ -1,0 +1,101 @@
+<%- include('../partials/head.ejs') %>
+<%- include('../partials/nav.ejs') %>
+
+<main class="flex-grow max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-10 w-full">
+    
+    <div class="bg-white rounded-3xl border border-gray-200 shadow-xl overflow-hidden">
+        
+        <!-- Header Banner -->
+        <div class="bg-slate-900 text-white p-6 sm:p-8 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div>
+                <span class="text-xs font-bold text-blue-400 uppercase tracking-wider">Mock Payment Gateway</span>
+                <h1 class="text-2xl font-extrabold mt-1">Complete Payment for Order #<%= order._id.toString().slice(-6) %></h1>
+            </div>
+            <div class="text-right bg-slate-800/80 px-5 py-3 rounded-2xl border border-slate-700">
+                <span class="text-[11px] text-gray-400 block uppercase font-medium">Total Amount Due</span>
+                <span class="text-2xl font-black text-blue-400">₹<%= order.totalAmount.toLocaleString('en-IN') %></span>
+            </div>
+        </div>
+
+        <div class="p-6 sm:p-8 space-y-8">
+            
+            <% if (typeof errorMessage !== 'undefined' && errorMessage) { %>
+                <div class="bg-red-50 border-l-4 border-red-500 p-4 rounded-xl flex items-center gap-3 text-xs text-red-700">
+                    <i class="fa-solid fa-triangle-exclamation text-lg text-red-500"></i>
+                    <div>
+                        <span class="font-bold block">Payment Execution Failed</span>
+                        <span><%= errorMessage %></span>
+                    </div>
+                </div>
+            <% } %>
+
+            <!-- Order Summary -->
+            <div class="bg-gray-50 p-5 rounded-2xl border border-gray-200/80 text-xs space-y-2">
+                <h3 class="font-bold text-gray-900 uppercase tracking-wider mb-2">Delivery Summary</h3>
+                <p><span class="font-semibold text-gray-700">Recipient:</span> <%= order.shippingAddress.fullName %> (<%= order.shippingAddress.phone %>)</p>
+                <p><span class="font-semibold text-gray-700">Address:</span> <%= order.shippingAddress.address %>, <%= order.shippingAddress.city %>, <%= order.shippingAddress.state %> - <%= order.shippingAddress.pincode %></p>
+            </div>
+
+            <!-- Payment Simulation Form -->
+            <form action="/payment/process" method="POST" class="space-y-6">
+                <input type="hidden" name="orderId" value="<%= order._id %>">
+
+                <div>
+                    <h3 class="text-xs font-bold text-gray-900 uppercase tracking-wider mb-3">Select Mock Payment Method</h3>
+                    
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <label class="border-2 border-blue-500 bg-blue-50/50 p-4 rounded-2xl cursor-pointer flex items-center gap-3 font-semibold text-xs text-gray-800">
+                            <input type="radio" name="paymentMethod" value="Mock Credit/Debit Card" checked class="text-blue-600 focus:ring-blue-500">
+                            <i class="fa-solid fa-credit-card text-blue-600 text-base"></i>
+                            Mock Card
+                        </label>
+                        
+                        <label class="border border-gray-200 p-4 rounded-2xl cursor-pointer flex items-center gap-3 font-semibold text-xs text-gray-800 hover:bg-gray-50">
+                            <input type="radio" name="paymentMethod" value="Mock UPI / NetBanking" class="text-blue-600 focus:ring-blue-500">
+                            <i class="fa-solid fa-qrcode text-emerald-600 text-base"></i>
+                            Mock UPI
+                        </label>
+
+                        <label class="border border-gray-200 p-4 rounded-2xl cursor-pointer flex items-center gap-3 font-semibold text-xs text-gray-800 hover:bg-gray-50">
+                            <input type="radio" name="paymentMethod" value="Cash on Delivery" class="text-blue-600 focus:ring-blue-500">
+                            <i class="fa-solid fa-money-bill-wave text-amber-600 text-base"></i>
+                            Cash on Delivery
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Simulation Action Controls -->
+                <div class="pt-6 border-t border-gray-100 space-y-4">
+                    <div class="bg-amber-50 border border-amber-200 p-4 rounded-2xl text-xs text-amber-800">
+                        <span class="font-bold flex items-center gap-1.5 mb-1">
+                            <i class="fa-solid fa-vial"></i> Chaos & Root Cause Analyzer Testing Controls
+                        </span>
+                        Choose whether to simulate a successful payment transaction or trigger a payment failure for IntelliTrace monitoring.
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <button type="submit" 
+                                name="paymentResult" 
+                                value="SUCCESS"
+                                class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3.5 px-6 rounded-2xl shadow-lg hover:shadow-emerald-500/20 transition flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-circle-check"></i> Pay Now (Simulate SUCCESS)
+                        </button>
+
+                        <button type="submit" 
+                                name="paymentResult" 
+                                value="FAILURE"
+                                class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3.5 px-6 rounded-2xl shadow-lg hover:shadow-red-500/20 transition flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-circle-xmark"></i> Simulate Payment FAILURE
+                        </button>
+                    </div>
+                </div>
+            </form>
+
+        </div>
+
+    </div>
+
+</main>
+
+</body>
+</html>

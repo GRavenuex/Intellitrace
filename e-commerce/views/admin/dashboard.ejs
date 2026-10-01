@@ -1,0 +1,116 @@
+<%- include('../partials/head.ejs') %>
+<%- include('../partials/nav.ejs') %>
+
+<main class="flex-grow max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 w-full">
+    
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between mb-8 gap-4">
+        <div>
+            <h1 class="text-3xl font-extrabold text-gray-900">Admin Control Center</h1>
+            <p class="text-xs text-gray-500 mt-1">Manage IntelliShop products, fulfill orders, and inspect user activity</p>
+        </div>
+
+        <div class="flex gap-2">
+            <a href="/intellitrace" target="_blank" class="bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow transition flex items-center gap-1.5">
+                <i class="fa-solid fa-chart-line"></i> Monitoring
+            </a>
+            <a href="/host/add-product" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow transition flex items-center gap-1.5">
+                <i class="fa-solid fa-plus"></i> Add New Product
+            </a>
+            <a href="/host/orders" class="bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition flex items-center gap-1.5">
+                <i class="fa-solid fa-boxes-packing"></i> Manage Orders
+            </a>
+        </div>
+    </div>
+
+    <!-- Navigation Tabs -->
+    <div class="flex border-b border-gray-200 mb-8 gap-6 text-sm font-bold">
+        <a href="/host/dashboard" class="pb-3 text-blue-600 border-b-2 border-blue-600">Overview</a>
+        <a href="/host/products" class="pb-3 text-gray-500 hover:text-gray-900">Products Inventory</a>
+        <a href="/host/orders" class="pb-3 text-gray-500 hover:text-gray-900">Orders</a>
+        <a href="/host/users" class="pb-3 text-gray-500 hover:text-gray-900">Users</a>
+    </div>
+
+    <!-- Stats Grid -->
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-6 mb-10">
+        <div class="bg-white p-6 rounded-3xl border border-gray-200 shadow-sm flex items-center justify-between">
+            <div>
+                <span class="text-xs text-gray-400 font-bold uppercase tracking-wider block">Total Products</span>
+                <span class="text-3xl font-black text-gray-900 mt-1 block"><%= stats.totalProducts %></span>
+            </div>
+            <div class="w-14 h-14 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center text-2xl">
+                <i class="fa-solid fa-laptop"></i>
+            </div>
+        </div>
+
+        <div class="bg-white p-6 rounded-3xl border border-gray-200 shadow-sm flex items-center justify-between">
+            <div>
+                <span class="text-xs text-gray-400 font-bold uppercase tracking-wider block">Total Orders</span>
+                <span class="text-3xl font-black text-gray-900 mt-1 block"><%= stats.totalOrders %></span>
+            </div>
+            <div class="w-14 h-14 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-2xl">
+                <i class="fa-solid fa-cart-check"></i>
+            </div>
+        </div>
+
+        <div class="bg-white p-6 rounded-3xl border border-gray-200 shadow-sm flex items-center justify-between">
+            <div>
+                <span class="text-xs text-gray-400 font-bold uppercase tracking-wider block">Registered Users</span>
+                <span class="text-3xl font-black text-gray-900 mt-1 block"><%= stats.totalUsers %></span>
+            </div>
+            <div class="w-14 h-14 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-2xl">
+                <i class="fa-solid fa-users"></i>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recent Orders Table -->
+    <div class="bg-white rounded-3xl border border-gray-200 shadow-sm overflow-hidden p-6">
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-bold text-gray-900">Recent Customer Orders</h2>
+            <a href="/host/orders" class="text-xs font-bold text-blue-600 hover:underline">View All Orders</a>
+        </div>
+
+        <% if (recentOrders.length === 0) { %>
+            <p class="text-xs text-gray-500 text-center py-6">No orders have been recorded yet.</p>
+        <% } else { %>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-xs text-gray-600">
+                    <thead class="bg-gray-50 uppercase text-[10px] font-bold text-gray-400 border-y border-gray-100">
+                        <tr>
+                            <th class="py-3 px-4">Order ID</th>
+                            <th class="py-3 px-4">Customer</th>
+                            <th class="py-3 px-4">Total</th>
+                            <th class="py-3 px-4">Payment</th>
+                            <th class="py-3 px-4">Status</th>
+                            <th class="py-3 px-4">Date</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-100 font-medium">
+                        <% recentOrders.forEach(function(order) { %>
+                            <tr class="hover:bg-gray-50/50">
+                                <td class="py-3 px-4 font-mono font-bold text-gray-900">#<%= order._id.toString().slice(-6) %></td>
+                                <td class="py-3 px-4"><%= order.userId ? order.userId.email : 'Guest' %></td>
+                                <td class="py-3 px-4 font-extrabold text-gray-900">₹<%= order.totalAmount.toLocaleString('en-IN') %></td>
+                                <td class="py-3 px-4">
+                                    <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold <%= order.paymentStatus === 'success' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700' %>">
+                                        <%= order.paymentStatus %>
+                                    </span>
+                                </td>
+                                <td class="py-3 px-4">
+                                    <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-700">
+                                        <%= order.orderStatus %>
+                                    </span>
+                                </td>
+                                <td class="py-3 px-4 text-gray-400"><%= new Date(order.createdAt).toLocaleDateString() %></td>
+                            </tr>
+                        <% }); %>
+                    </tbody>
+                </table>
+            </div>
+        <% } %>
+    </div>
+
+</main>
+
+</body>
+</html>
