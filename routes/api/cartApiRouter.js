@@ -4,6 +4,7 @@ const Cart = require('../../models/cart');
 const Product = require('../../models/product');
 const { isAuth } = require('../../middleware/authMiddleware');
 const logger = require('../../middleware/logger');
+const metrics = require('../../utils/metrics');
 
 // GET /api/cart
 router.get('/', isAuth, async (req, res, next) => {
@@ -52,6 +53,7 @@ router.post('/', isAuth, async (req, res, next) => {
 
         cart.calculateTotal();
         await cart.save();
+        metrics.cartOperationsTotal.inc({ operation: 'add' });
 
         logger.info(`[API] Added product to cart`, { userId: req.session.user.id, productId });
         res.status(200).json({
@@ -88,6 +90,7 @@ router.put('/:productId', isAuth, async (req, res, next) => {
             }
             cart.calculateTotal();
             await cart.save();
+            metrics.cartOperationsTotal.inc({ operation: 'update' });
         }
 
         res.status(200).json({
@@ -108,6 +111,7 @@ router.delete('/:productId', isAuth, async (req, res, next) => {
             cart.items = cart.items.filter(item => item.productId.toString() !== req.params.productId);
             cart.calculateTotal();
             await cart.save();
+            metrics.cartOperationsTotal.inc({ operation: 'remove' });
         }
 
         res.status(200).json({

@@ -12,15 +12,13 @@ const errorHandler = require("./middleware/errorHandler");
 const requestContext = require("./middleware/requestContext");
 const requestLogger = require("./middleware/requestLogger");
 
-// Metrics
-const databaseMetricsPlugin = require("./metrics/databaseMetrics");
-const metrics = require("./metrics/metrics");
-mongoose.plugin(databaseMetricsPlugin);
+// Prometheus Metrics
+const metrics = require("./utils/metrics");
+
 // Routers
 const userRouter = require("./routes/userRouter");
 const authRouter = require("./routes/authRouter");
 const hostRouter = require("./routes/hostRouter");
-const intellitraceRouter = require("./routes/intellitraceRouter");
 
 // REST API Routers
 const userApiRouter = require("./routes/api/userApiRouter");
@@ -125,7 +123,6 @@ app.use(authRouter);
 app.use(userRouter);
 app.use("/host", hostRouter);
 app.use("/admin", hostRouter);
-app.use("/intellitrace", intellitraceRouter);
 
 //Health Check Endpoint
 app.get('/health', (req, res) => {
@@ -148,8 +145,16 @@ app.get('/health', (req, res) => {
 });
 
 // Metrics Endpoint
-app.get('/metrics', (req, res) => {
-    res.status(200).json(metrics.getMetrics());
+app.get('/metrics', async (req, res) => {
+    try {
+        const isDbConnected = mongoose.connection.readyState === 1;
+        metrics.healthStatus.set(isDbConnected ? 1 : 0);
+
+        res.set('Content-Type', metrics.register.contentType);
+        res.end(await metrics.register.metrics());
+    } catch (err) {
+        res.status(500).end(err);
+    }
 });
 
 // Development Failure Simulation Endpoints

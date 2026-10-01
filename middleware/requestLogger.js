@@ -1,8 +1,15 @@
 const logger = require('./logger');
-const metrics = require('../metrics/metrics');
+const metrics = require('../utils/metrics');
 
 const requestLogger = (req, res, next) => {
-    res.on("finish", () => {
+    metrics.httpRequestsInFlight.inc();
+    let isFinished = false;
+
+    const onFinish = () => {
+        if (isFinished) return;
+        isFinished = true;
+        metrics.httpRequestsInFlight.dec();
+
         const responseTime = req.requestStartTime ? Date.now() - req.requestStartTime : 0;
         
         let level = 'INFO';
@@ -17,7 +24,17 @@ const requestLogger = (req, res, next) => {
         }
 
         const userId = (req.session && req.session.user && (req.session.user.id || req.session.user._id)) || null;
-        const routePath = (req.route && req.route.path) ? req.route.path : req.originalUrl;
+        let routePath = "unknown";
+        if (req.route && req.route.path) {
+            routePath = (req.baseUrl || "") + req.route.path;
+        } else if (res.statusCode === 404) {
+            routePath = "404_not_found";
+        } else if (req.path.match(/\.(css|js|jpg|jpeg|png|gif|svg|ico|webp|woff|woff2|ttf)$/i)) {
+            routePath = "static_asset";
+        } else if (req.path) {
+            // Keep cardinality low by stripping UUIDs/ObjectIDs if it falls back to req.path
+            routePath = req.path.replace(/\/[0-9a-fA-F-]{8,}/g, '/:id');
+        }
         
         const logMeta = {
             method: req.method,
@@ -37,8 +54,29 @@ const requestLogger = (req, res, next) => {
         }
 
         // Record metrics
-        metrics.recordRequest(res.statusCode, responseTime, routePath);
-    });
+        metrics.httpRequestsTotal.inc({
+            method: req.method,
+            route: routePath,
+            status_code: res.statusCode
+        });
+        
+        if (res.statusCode >= 400) {
+            metrics.httpErrorsTotal.inc({
+                method: req.method,
+                route: routePath,
+                status_code: res.statusCode
+            });
+        }
+        
+        metrics.httpRequestDurationSeconds.observe({
+            method: req.method,
+            route: routePath,
+            status_code: res.statusCode
+        }, responseTime / 1000);
+    };
+
+    res.on("finish", onFinish);
+    res.on("close", onFinish);
     
     next();
 };

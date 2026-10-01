@@ -5,6 +5,7 @@ const Payment = require('../models/payment');
 const Notification = require('../models/notification');
 const logger = require('../middleware/logger');
 const product = require('../models/product');
+const metrics = require('../utils/metrics');
 
 
 exports.getHome = async (req, res, next) => {
@@ -194,6 +195,7 @@ exports.postAddToCart = async (req, res , next)=>{
             });
             cart.calculateTotal();
             await cart.save();
+            metrics.cartOperationsTotal.inc({ operation: 'add' });
 
             logger.info("Product added to cart", {
                 requestId: req.requestId,
@@ -238,6 +240,7 @@ exports.postUpdateCart = async(req , res , next)=>{
             }
             cart.calculateTotal();
             await cart.save();
+            metrics.cartOperationsTotal.inc({ operation: 'update' });
         }
         logger.info("Cart updated", { 
             requestId: req.requestId,
@@ -269,6 +272,7 @@ exports.postRemoveFromCart = async (req, res, next) => {
             cart.items = cart.items.filter(item => item.productId.toString() !== productId);
             cart.calculateTotal();
             await cart.save();
+            metrics.cartOperationsTotal.inc({ operation: 'remove' });
             logger.info("Product removed from cart", { 
                 requestId: req.requestId,
                 userId, 
@@ -347,6 +351,7 @@ exports.postCreateOrder = async (req, res, next) => {
         });
 
         await order.save();
+        metrics.ordersCreatedTotal.inc();
         logger.info("Order created", { 
             requestId: req.requestId,
             userId,
@@ -405,6 +410,7 @@ exports.postProcessPayment = async (req, res, next) => {
             requestId: req.requestId,
             orderId 
         });
+        metrics.paymentsStartedTotal.inc();
 
         const transactionId = 'TXN-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
 
@@ -424,6 +430,7 @@ exports.postProcessPayment = async (req, res, next) => {
                 paymentMethod
             });
             await payment.save();
+            metrics.paymentsFailedTotal.inc();
 
             order.paymentStatus = 'failed';
             await order.save();
@@ -448,6 +455,7 @@ exports.postProcessPayment = async (req, res, next) => {
             paymentMethod
         });
         await payment.save();
+        metrics.paymentsSuccessTotal.inc();
 
         order.paymentStatus = 'success';
         order.orderStatus = 'confirmed';

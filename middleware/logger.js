@@ -59,6 +59,9 @@ const formatLog = (level, message, meta = {}) => {
     return JSON.stringify(logEntry);
 };
 
+// Forward to IntelliTrace backend if available (Phase 5)
+const intellitraceIntegration = require('../utils/intellitrace-integration');
+
 const writeLog = (level, message, meta = {}) => {
     const logString = formatLog(level, message, meta);
     
@@ -72,6 +75,9 @@ const writeLog = (level, message, meta = {}) => {
         appLogStream.write(logString + '\n');
         console.log(logString);
     }
+    
+    // Asynchronously send to IntelliTrace without blocking
+    intellitraceIntegration.sendLog(logString);
 };
 
 const logger = {

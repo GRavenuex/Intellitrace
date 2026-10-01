@@ -4,6 +4,7 @@ const Order = require('../../models/order');
 const Cart = require('../../models/cart');
 const { isAuth, isAdmin } = require('../../middleware/authMiddleware');
 const logger = require('../../middleware/logger');
+const metrics = require('../../utils/metrics');
 
 // POST /api/orders
 router.post('/', isAuth, async (req, res, next) => {
@@ -37,6 +38,7 @@ router.post('/', isAuth, async (req, res, next) => {
         });
 
         await order.save();
+        metrics.ordersCreatedTotal.inc();
         logger.info(`[API] Order created: ${order._id}`);
 
         res.status(201).json({

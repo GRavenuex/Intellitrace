@@ -2,6 +2,7 @@ const { check, validationResult } = require("express-validator");
 const bcrypt = require("bcryptjs");
 const User = require("../models/user");
 const logger = require("../middleware/logger");
+const metrics = require("../utils/metrics");
 
 exports.getLogin = (req, res, next) => {
     res.render('auth/login', {
@@ -72,6 +73,7 @@ exports.postSignup = [
         try {
             const existingUser = await User.findOne({ email });
             if (existingUser) {
+                metrics.authFailureTotal.inc({ operation: 'register' });
                 return res.status(422).render("auth/signup", {
                     pageTitle: "Sign Up - IntelliShop",
                     currentPage: "signup",
@@ -92,9 +94,11 @@ exports.postSignup = [
             });
 
             await user.save();
+            metrics.authSuccessTotal.inc({ operation: 'register' });
             logger.info(`User registered successfully: ${email}`, { role: user.userType });
             res.redirect("/login");
         } catch (err) {
+            metrics.authFailureTotal.inc({ operation: 'register' });
             logger.error("Signup error", { error: err.message });
             return res.status(422).render("auth/signup", {
                 pageTitle: "Sign Up - IntelliShop",
@@ -118,6 +122,7 @@ exports.postLogin = async (req, res, next) => {
                 requestId: req.requestId,
                 email: email
             });
+            metrics.authFailureTotal.inc({ operation: 'login' });
             return res.status(422).render("auth/login", {
                 pageTitle: "Login - IntelliShop",
                 currentPage: "login",
@@ -134,6 +139,7 @@ exports.postLogin = async (req, res, next) => {
                 requestId: req.requestId,
                 userId: user._id.toString()
             });
+            metrics.authFailureTotal.inc({ operation: 'login' });
             return res.status(422).render("auth/login", {
                 pageTitle: "Login - IntelliShop",
                 currentPage: "login",
@@ -156,8 +162,10 @@ exports.postLogin = async (req, res, next) => {
             requestId: req.requestId,
             userId: user._id.toString()
         });
+        metrics.authSuccessTotal.inc({ operation: 'login' });
         res.redirect("/");
     } catch (err) {
+        metrics.authFailureTotal.inc({ operation: 'login' });
         logger.error("Login server error", { error: err.message });
         next(err);
     }
@@ -177,6 +185,7 @@ exports.postLogout = (req, res, next) => {
                 requestId: req.requestId,
                 userId: userId
             });
+            metrics.authSuccessTotal.inc({ operation: 'logout' });
         }
         res.redirect("/login");
     });

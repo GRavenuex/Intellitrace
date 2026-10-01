@@ -6,6 +6,7 @@ const Cart = require('../../models/cart');
 const Notification = require('../../models/notification');
 const { isAuth } = require('../../middleware/authMiddleware');
 const logger = require('../../middleware/logger');
+const metrics = require('../../utils/metrics');
 
 // POST /api/payments
 router.post('/', isAuth, async (req, res, next) => {
@@ -23,6 +24,7 @@ router.post('/', isAuth, async (req, res, next) => {
 
         const transactionId = 'TXN-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
         logger.info(`[API] Payment initiated`, { orderId, amount: order.totalAmount, simulateResult });
+        metrics.paymentsStartedTotal.inc();
 
         if (simulateResult === 'FAILURE') {
             const payment = new Payment({
@@ -34,6 +36,7 @@ router.post('/', isAuth, async (req, res, next) => {
                 paymentMethod: paymentMethod || 'Mock Card'
             });
             await payment.save();
+            metrics.paymentsFailedTotal.inc();
 
             order.paymentStatus = 'failed';
             await order.save();
@@ -57,6 +60,7 @@ router.post('/', isAuth, async (req, res, next) => {
             paymentMethod: paymentMethod || 'Mock Card'
         });
         await payment.save();
+        metrics.paymentsSuccessTotal.inc();
 
         order.paymentStatus = 'success';
         order.orderStatus = 'confirmed';
