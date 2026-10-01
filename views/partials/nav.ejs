@@ -1,0 +1,93 @@
+<!-- Header / Navbar -->
+<header class="bg-slate-900 text-white shadow-lg sticky top-0 z-50">
+    <nav class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5">
+        <div class="flex items-center justify-between gap-4">
+            
+            <!-- Logo -->
+            <a href="/" class="flex items-center gap-3 group">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center shadow-md group-hover:scale-105 transition-transform">
+                    <i class="fa-solid fa-microchip text-white text-xl"></i>
+                </div>
+                <div class="flex flex-col">
+                    <span class="text-2xl font-extrabold tracking-tight text-white group-hover:text-blue-400 transition-colors">
+                        Intelli<span class="text-blue-500">Shop</span>
+                    </span>
+                    <span class="text-[10px] text-gray-400 tracking-wider font-medium uppercase -mt-1">Next-Gen Electronics</span>
+                </div>
+            </a>
+
+            <!-- Search Quick Bar -->
+            <form action="/products" method="GET" class="hidden md:flex flex-1 max-w-md mx-4">
+                <div class="relative w-full">
+                    <input type="text" 
+                           name="search" 
+                           placeholder="Search laptops, smartphones, headphones..." 
+                           class="w-full bg-slate-800 text-sm text-gray-200 placeholder-gray-400 pl-10 pr-4 py-2 rounded-full border border-slate-700 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all">
+                    <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3 text-gray-400 text-sm"></i>
+                </div>
+            </form>
+
+            <!-- Navigation Links -->
+            <ul class="flex items-center gap-2 sm:gap-4 text-sm font-semibold">
+                <li>
+                    <a href="/" class="px-3 py-2 rounded-lg text-gray-300 hover:text-white hover:bg-slate-800 transition">
+                        Home
+                    </a>
+                </li>
+                <li>
+                    <a href="/products" class="px-3 py-2 rounded-lg text-gray-300 hover:text-white hover:bg-slate-800 transition">
+                        Products
+                    </a>
+                </li>
+
+                <% if (isLoggedIn) { %>
+                    <li>
+                        <a href="/orders" class="px-3 py-2 rounded-lg text-gray-300 hover:text-white hover:bg-slate-800 transition flex items-center gap-1.5">
+                            <i class="fa-solid fa-box text-blue-400"></i>
+                            My Orders
+                        </a>
+                    </li>
+                    <li>
+                        <a href="/cart" class="px-3 py-2 rounded-lg text-gray-300 hover:text-white hover:bg-slate-800 transition flex items-center gap-1.5 relative">
+                            <i class="fa-solid fa-cart-shopping text-blue-400"></i>
+                            <span>Cart</span>
+                        </a>
+                    </li>
+
+                    <% if (user && (user.userType === 'admin' || user.userType === 'host')) { %>
+                        <li>
+                            <a href="/host/dashboard" class="px-3 py-2 rounded-lg bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 transition border border-amber-500/30 flex items-center gap-1.5">
+                                <i class="fa-solid fa-gauge"></i>
+                                Admin Panel
+                            </a>
+                        </li>
+                    <% } %>
+
+                    <!-- User Logout Form -->
+                    <li class="pl-2 border-l border-slate-700">
+                        <form action="/logout" method="POST" class="inline">
+                            <button type="submit" class="bg-red-600 hover:bg-red-700 text-white px-4 py-1.5 rounded-full text-xs font-semibold shadow transition">
+                                Logout
+                            </button>
+                        </form>
+                    </li>
+
+                <% } else { %>
+
+                    <li>
+                        <a href="/login" class="px-4 py-2 rounded-full text-gray-300 hover:text-white hover:bg-slate-800 transition">
+                            Login
+                        </a>
+                    </li>
+                    <li>
+                        <a href="/signup" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-full text-xs font-semibold shadow-md transition">
+                            Sign Up
+                        </a>
+                    </li>
+
+                <% } %>
+            </ul>
+
+        </div>
+    </nav>
+</header>

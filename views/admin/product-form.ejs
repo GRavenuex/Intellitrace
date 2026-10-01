@@ -1,0 +1,91 @@
+<%- include('../partials/head.ejs') %>
+<%- include('../partials/nav.ejs') %>
+
+<main class="flex-grow max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-10 w-full">
+    
+    <div class="bg-white rounded-3xl border border-gray-200 shadow-xl p-8 space-y-6">
+        
+        <div>
+            <h1 class="text-2xl font-extrabold text-gray-900"><%= editing ? 'Edit Product' : 'Add New Product' %></h1>
+            <p class="text-xs text-gray-500 mt-1">Enter specifications and inventory data for the product</p>
+        </div>
+
+        <form action="<%= editing ? '/host/edit-product' : '/host/add-product' %>" method="POST" enctype="multipart/form-data" class="space-y-5">
+            <% if (editing) { %>
+                <input type="hidden" name="id" value="<%= product._id %>">
+            <% } %>
+
+            <div>
+                <label for="name" class="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">Product Title</label>
+                <input type="text" id="name" name="name" required value="<%= editing ? product.name : '' %>" placeholder="e.g. MacBook Air M3" 
+                       class="w-full px-4 py-2.5 rounded-xl border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                    <label for="price" class="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">Price (₹)</label>
+                    <input type="number" id="price" name="price" required value="<%= editing ? product.price : '' %>" placeholder="89999" 
+                           class="w-full px-4 py-2.5 rounded-xl border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+
+                <div>
+                    <label for="category" class="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">Category</label>
+                    <select id="category" name="category" required class="w-full px-4 py-2.5 rounded-xl border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+                        <option value="Laptops" <%= editing && product.category === 'Laptops' ? 'selected' : '' %>>Laptops</option>
+                        <option value="Smartphones" <%= editing && product.category === 'Smartphones' ? 'selected' : '' %>>Smartphones</option>
+                        <option value="Headphones" <%= editing && product.category === 'Headphones' ? 'selected' : '' %>>Headphones</option>
+                        <option value="Keyboards" <%= editing && product.category === 'Keyboards' ? 'selected' : '' %>>Keyboards</option>
+                        <option value="Mice" <%= editing && product.category === 'Mice' ? 'selected' : '' %>>Mice</option>
+                        <option value="Monitors" <%= editing && product.category === 'Monitors' ? 'selected' : '' %>>Monitors</option>
+                        <option value="Accessories" <%= editing && product.category === 'Accessories' ? 'selected' : '' %>>Accessories</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label for="brand" class="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">Brand</label>
+                    <input type="text" id="brand" name="brand" required value="<%= editing ? product.brand : '' %>" placeholder="Apple, Dell, Sony..." 
+                           class="w-full px-4 py-2.5 rounded-xl border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                    <label for="stock" class="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">Stock Quantity</label>
+                    <input type="number" id="stock" name="stock" required value="<%= editing ? product.stock : 10 %>" placeholder="10" 
+                           class="w-full px-4 py-2.5 rounded-xl border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+
+                <div>
+                    <label for="photo" class="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">Product Image File</label>
+                    <input type="file" id="photo" name="photo" class="w-full text-xs text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
+                </div>
+            </div>
+
+            <div>
+                <label for="imageUrl" class="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">Or Image URL</label>
+                <input type="url" id="imageUrl" name="imageUrl" value="<%= editing ? product.image : '' %>" placeholder="https://images.unsplash.com/..." 
+                       class="w-full px-4 py-2.5 rounded-xl border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+
+            <div>
+                <label for="description" class="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">Product Description</label>
+                <textarea id="description" name="description" rows="4" required placeholder="Detailed tech specifications..." 
+                          class="w-full px-4 py-2.5 rounded-xl border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"><%= editing ? product.description : '' %></textarea>
+            </div>
+
+            <div class="pt-4 flex gap-3">
+                <button type="submit" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl shadow transition">
+                    <%= editing ? 'Update Product' : 'Save Product' %>
+                </button>
+                <a href="/host/products" class="bg-gray-100 hover:bg-gray-200 text-gray-800 font-semibold py-3 px-6 rounded-xl transition text-xs flex items-center">
+                    Cancel
+                </a>
+            </div>
+        </form>
+
+    </div>
+
+</main>
+
+</body>
+</html>
