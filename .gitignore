@@ -1,24 +1,5 @@
-<<<<<<< HEAD
 node_modules/
 .env
 .DS_Store
 logs/
 *.log
-=======
-# Dependencies
-node_modules/
-
-# Environment variables
-.env
-
-# Logs
-logs/
-*.log
-
-# Uploaded files
-uploads/
-
-# OS files
-.DS_Store
-Thumbs.db
->>>>>>> 618f07a5420f9c4284d2c680ea93d43a505d0381
