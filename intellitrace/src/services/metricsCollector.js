@@ -27,10 +27,10 @@ const startMetricsCollector = () => {
                         return sum;
                     };
 
-                    let requestsTotal = sumMetric('intellishop_http_requests_total');
-                    let errorsTotal = sumMetric('intellishop_http_errors_total');
-                    let durationSum = sumMetric('intellishop_http_request_duration_seconds_sum');
-                    let durationCount = sumMetric('intellishop_http_request_duration_seconds_count');
+                    let requestsTotal = sumMetric('(?:intellishop|intellishop_[a-z]+)_http_requests_total');
+                    let errorsTotal = sumMetric('(?:intellishop|intellishop_[a-z]+)_http_errors_total');
+                    let durationSum = sumMetric('(?:intellishop|intellishop_[a-z]+)_http_request_duration_seconds_sum');
+                    let durationCount = sumMetric('(?:intellishop|intellishop_[a-z]+)_http_request_duration_seconds_count');
                     
                     let ordersCreatedTotal = sumMetric('intellishop_orders_created_total');
                     let paymentsStartedTotal = sumMetric('intellishop_payments_started_total');

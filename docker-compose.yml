@@ -1,0 +1,314 @@
+name: intellitrace-stack
+
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: mongodb
+    ports:
+      - "${MONGODB_PORT:-27017}:27017"
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - intellitrace-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --eval 'db.adminCommand(\"ping\")' --quiet || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  db-seed:
+    build:
+      context: ./e-commerce
+      dockerfile: Dockerfile
+    container_name: db-seed
+    command: ["node", "scripts/seed-all.js"]
+    environment:
+      ECOMMERCE_MONGO_URI: ${ECOMMERCE_MONGO_URI:-mongodb://mongodb:27017/ecommerce}
+      INTELLITRACE_MONGO_URI: ${INTELLITRACE_MONGO_URI:-mongodb://mongodb:27017/intellitrace}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - intellitrace-network
+    restart: "no"
+
+  product-service:
+    build:
+      context: ./e-commerce/services/product-service
+      dockerfile: Dockerfile
+    container_name: product-service
+    ports:
+      - "3001:3001"
+    environment:
+      PORT: 3001
+      NODE_ENV: ${NODE_ENV:-development}
+      MONGO_URI: ${ECOMMERCE_MONGO_URI:-mongodb://mongodb:27017/ecommerce}
+      INTELLITRACE_URL: ${INTELLITRACE_URL:-http://intellitrace-backend:4000/api/v1}
+      SERVICE_BASE_URL: http://product-service:3001
+      INTELLITRACE_API_KEY: ${INTELLITRACE_API_KEY:-default_telemetry_key}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4318}
+      OTEL_SERVICE_NAME: product-service
+      FAILURE_INJECTION_ENABLED: ${FAILURE_INJECTION_ENABLED:-false}
+      FAILURE_INJECTION_ENVIRONMENTS: ${FAILURE_INJECTION_ENVIRONMENTS:-development,test}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - intellitrace-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3001/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  cart-service:
+    build:
+      context: ./e-commerce/services/cart-service
+      dockerfile: Dockerfile
+    container_name: cart-service
+    ports:
+      - "3002:3002"
+    environment:
+      PORT: 3002
+      NODE_ENV: ${NODE_ENV:-development}
+      MONGO_URI: ${ECOMMERCE_MONGO_URI:-mongodb://mongodb:27017/ecommerce}
+      PRODUCT_SERVICE_URL: http://product-service:3001
+      INTELLITRACE_URL: ${INTELLITRACE_URL:-http://intellitrace-backend:4000/api/v1}
+      SERVICE_BASE_URL: http://cart-service:3002
+      INTELLITRACE_API_KEY: ${INTELLITRACE_API_KEY:-default_telemetry_key}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4318}
+      OTEL_SERVICE_NAME: cart-service
+      FAILURE_INJECTION_ENABLED: ${FAILURE_INJECTION_ENABLED:-false}
+      FAILURE_INJECTION_ENVIRONMENTS: ${FAILURE_INJECTION_ENVIRONMENTS:-development,test}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      product-service:
+        condition: service_healthy
+    networks:
+      - intellitrace-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3002/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  order-service:
+    build:
+      context: ./e-commerce/services/order-service
+      dockerfile: Dockerfile
+    container_name: order-service
+    ports:
+      - "3003:3003"
+    environment:
+      PORT: 3003
+      NODE_ENV: ${NODE_ENV:-development}
+      MONGO_URI: ${ECOMMERCE_MONGO_URI:-mongodb://mongodb:27017/ecommerce}
+      INTELLITRACE_URL: ${INTELLITRACE_URL:-http://intellitrace-backend:4000/api/v1}
+      SERVICE_BASE_URL: http://order-service:3003
+      PAYMENT_SERVICE_URL: http://payment-service:3004
+      INTELLITRACE_API_KEY: ${INTELLITRACE_API_KEY:-default_telemetry_key}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4318}
+      OTEL_SERVICE_NAME: order-service
+      FAILURE_INJECTION_ENABLED: ${FAILURE_INJECTION_ENABLED:-false}
+      FAILURE_INJECTION_ENVIRONMENTS: ${FAILURE_INJECTION_ENVIRONMENTS:-development,test}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - intellitrace-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3003/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  payment-service:
+    build:
+      context: ./e-commerce/services/payment-service
+      dockerfile: Dockerfile
+    container_name: payment-service
+    ports:
+      - "3004:3004"
+    environment:
+      PORT: 3004
+      NODE_ENV: ${NODE_ENV:-development}
+      MONGO_URI: ${ECOMMERCE_MONGO_URI:-mongodb://mongodb:27017/ecommerce}
+      ORDER_SERVICE_URL: http://order-service:3003
+      CART_SERVICE_URL: http://cart-service:3002
+      INTELLITRACE_URL: ${INTELLITRACE_URL:-http://intellitrace-backend:4000/api/v1}
+      SERVICE_BASE_URL: http://payment-service:3004
+      INTELLITRACE_API_KEY: ${INTELLITRACE_API_KEY:-default_telemetry_key}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4318}
+      OTEL_SERVICE_NAME: payment-service
+      FAILURE_INJECTION_ENABLED: ${FAILURE_INJECTION_ENABLED:-false}
+      FAILURE_INJECTION_ENVIRONMENTS: ${FAILURE_INJECTION_ENVIRONMENTS:-development,test}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      order-service:
+        condition: service_healthy
+      cart-service:
+        condition: service_healthy
+    networks:
+      - intellitrace-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3004/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  intellishop-gateway:
+    build:
+      context: ./e-commerce
+      dockerfile: Dockerfile
+    container_name: intellishop-gateway
+    ports:
+      - "${GATEWAY_PORT:-3000}:3000"
+    environment:
+      PORT: 3000
+      NODE_ENV: ${NODE_ENV:-development}
+      MONGO_URI: ${ECOMMERCE_MONGO_URI:-mongodb://mongodb:27017/ecommerce}
+      SESSION_SECRET: ${SESSION_SECRET:-Gaurav}
+      PRODUCT_SERVICE_URL: http://product-service:3001
+      CART_SERVICE_URL: http://cart-service:3002
+      ORDER_SERVICE_URL: http://order-service:3003
+      PAYMENT_SERVICE_URL: http://payment-service:3004
+      INTELLITRACE_URL: ${INTELLITRACE_URL:-http://intellitrace-backend:4000/api/v1}
+      SERVICE_BASE_URL: http://intellishop-gateway:3000
+      INTELLITRACE_API_KEY: ${INTELLITRACE_API_KEY:-default_telemetry_key}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://jaeger:4318}
+      OTEL_SERVICE_NAME: intellishop-gateway
+      FAILURE_INJECTION_ENABLED: ${FAILURE_INJECTION_ENABLED:-false}
+      FAILURE_INJECTION_ENVIRONMENTS: ${FAILURE_INJECTION_ENVIRONMENTS:-development,test}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      product-service:
+        condition: service_healthy
+      cart-service:
+        condition: service_healthy
+      order-service:
+        condition: service_healthy
+      payment-service:
+        condition: service_healthy
+    networks:
+      - intellitrace-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  intellitrace-backend:
+    build:
+      context: ./intellitrace
+      dockerfile: Dockerfile
+    container_name: intellitrace-backend
+    ports:
+      - "${INTELLITRACE_PORT:-4000}:4000"
+    environment:
+      PORT: 4000
+      NODE_ENV: ${NODE_ENV:-development}
+      MONGO_URI: ${INTELLITRACE_MONGO_URI:-mongodb://mongodb:27017/intellitrace}
+      JWT_SECRET: ${JWT_SECRET:-intellitrace_jwt_production_secret_key_2026}
+      TELEMETRY_API_KEY: ${TELEMETRY_API_KEY:-default_telemetry_key}
+      METRICS_POLL_INTERVAL_MS: ${METRICS_POLL_INTERVAL_MS:-15000}
+      JAEGER_URL: ${JAEGER_URL:-http://jaeger:16686}
+      FAILURE_INJECTION_ENVIRONMENTS: ${FAILURE_INJECTION_ENVIRONMENTS:-development,test}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - intellitrace-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:4000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  intellitrace-frontend:
+    build:
+      context: ./intellitrace/client
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:4000/api}
+    container_name: intellitrace-frontend
+    ports:
+      - "${FRONTEND_PORT:-5173}:80"
+    depends_on:
+      intellitrace-backend:
+        condition: service_healthy
+    networks:
+      - intellitrace-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:80/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: jaeger
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "${JAEGER_UI_PORT:-16686}:16686"
+      - "4317:4317"
+      - "4318:4318"
+    networks:
+      - intellitrace-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:16686/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      intellishop-gateway:
+        condition: service_healthy
+      product-service:
+        condition: service_healthy
+      cart-service:
+        condition: service_healthy
+      order-service:
+        condition: service_healthy
+      payment-service:
+        condition: service_healthy
+    networks:
+      - intellitrace-network
+    restart: unless-stopped
+
+networks:
+  intellitrace-network:
+    driver: bridge
+
+volumes:
+  mongodb_data:
+  prometheus_data:

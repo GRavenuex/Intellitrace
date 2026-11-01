@@ -1,0 +1,504 @@
+<!-- Developer Controls / Failure Simulation Component -->
+<div id="developer-controls-container" class="mt-12 pt-8 border-t-2 border-dashed border-gray-200">
+    <div class="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-3xl p-6 sm:p-8 text-white shadow-2xl border border-indigo-900/50">
+        
+        <!-- Header -->
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between pb-6 border-b border-indigo-800/60 gap-4">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-2xl bg-indigo-600/30 border border-indigo-500/40 flex items-center justify-center text-indigo-400 text-lg">
+                    <i class="fa-solid fa-flask-vial"></i>
+                </div>
+                <div>
+                    <div class="flex items-center gap-2">
+                        <h2 class="text-lg font-black tracking-wide text-white">Developer Controls / Failure Simulation</h2>
+                        <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 uppercase tracking-wider">Dev Only</span>
+                    </div>
+                    <p class="text-xs text-indigo-200/80 mt-0.5">Inject controlled real-world failure scenarios for IntelliTrace observability and root-cause analysis.</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-2">
+                <span id="dev-active-count-badge" class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-indigo-950 border border-indigo-800 text-indigo-300 flex items-center gap-2">
+                    <span class="w-2 h-2 rounded-full bg-slate-500" id="dev-status-indicator"></span>
+                    <span id="dev-active-count-text">0 Active Rules</span>
+                </span>
+            </div>
+        </div>
+
+        <!-- Simulation Cards Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6" id="simulation-cards-grid">
+            <% 
+            const devService = typeof targetService !== 'undefined' ? targetService : 'product-service';
+            const devPage = typeof pageContext !== 'undefined' ? pageContext : 'product';
+
+            let scenarios = [];
+
+            if (devPage === 'product') {
+                scenarios = [
+                    {
+                        id: 'product-http-500',
+                        name: 'Simulate Product HTTP 500',
+                        service: 'product-service',
+                        type: 'http_500',
+                        icon: 'fa-solid fa-triangle-exclamation',
+                        color: 'red',
+                        description: 'Returns real HTTP 500 error when product retrieval requests execute through API Gateway.',
+                        hasLatency: false,
+                        hasSpike: false
+                    },
+                    {
+                        id: 'product-high-latency',
+                        name: 'Simulate Product Service High Latency',
+                        service: 'product-service',
+                        type: 'latency',
+                        icon: 'fa-solid fa-clock',
+                        color: 'amber',
+                        description: 'Adds artificial delay (5s or 10s) to product catalog operations while preserving functionality.',
+                        hasLatency: true,
+                        hasSpike: false
+                    },
+                    {
+                        id: 'product-db-timeout',
+                        name: 'Simulate Database Query Timeout',
+                        service: 'product-service',
+                        type: 'database_timeout',
+                        icon: 'fa-solid fa-database',
+                        color: 'purple',
+                        description: 'Forces product catalog DB operation to exceed application timeout limit without database shutdown.',
+                        hasLatency: false,
+                        hasSpike: false
+                    },
+                    {
+                        id: 'product-traffic-spike',
+                        name: 'Simulate Traffic Spike',
+                        service: 'product-service',
+                        type: 'traffic_spike',
+                        icon: 'fa-solid fa-bolt',
+                        color: 'blue',
+                        description: 'Generates a burst of real concurrent HTTP requests against Product Service to test service overload.',
+                        hasLatency: false,
+                        hasSpike: true
+                    }
+                ];
+            } else if (devPage === 'checkout') {
+                scenarios = [
+                    {
+                        id: 'service-communication-failure',
+                        name: 'Simulate Service Communication Failure',
+                        service: 'order-service',
+                        type: 'service_communication_failure',
+                        sourceService: 'order-service',
+                        targetOperation: 'payment-service',
+                        icon: 'fa-solid fa-network-wired',
+                        color: 'orange',
+                        description: 'Order Service encounters a downstream connection failure (ECONNREFUSED) when calling Payment Service.',
+                        hasLatency: false,
+                        hasSpike: false
+                    },
+                    {
+                        id: 'cascading-failure',
+                        name: 'Simulate Cascading Failure',
+                        service: 'payment-service',
+                        type: 'cascading_failure',
+                        icon: 'fa-solid fa-water',
+                        color: 'rose',
+                        description: 'Originates in Payment Service (HTTP 500) and cascades downstream to Order Service and Checkout.',
+                        hasLatency: false,
+                        hasSpike: false
+                    },
+                    {
+                        id: 'order-db-timeout',
+                        name: 'Simulate Database Query Timeout',
+                        service: 'order-service',
+                        type: 'database_timeout',
+                        icon: 'fa-solid fa-database',
+                        color: 'purple',
+                        description: 'Simulates controlled database timeout during order creation without corrupting database records.',
+                        hasLatency: false,
+                        hasSpike: false
+                    },
+                    {
+                        id: 'order-traffic-spike',
+                        name: 'Simulate Traffic Spike',
+                        service: 'order-service',
+                        type: 'traffic_spike',
+                        icon: 'fa-solid fa-bolt',
+                        color: 'blue',
+                        description: 'Generates controlled burst of concurrent requests against Order Service to test load handling.',
+                        hasLatency: false,
+                        hasSpike: true
+                    }
+                ];
+            } else if (devPage === 'payment') {
+                scenarios = [
+                    {
+                        id: 'payment-http-500',
+                        name: 'Simulate Payment HTTP 500',
+                        service: 'payment-service',
+                        type: 'http_500',
+                        icon: 'fa-solid fa-circle-xmark',
+                        color: 'red',
+                        description: 'Payment Service returns genuine HTTP 500 Internal Error during real checkout request.',
+                        hasLatency: false,
+                        hasSpike: false
+                    },
+                    {
+                        id: 'payment-high-latency',
+                        name: 'Simulate Payment Service High Latency',
+                        service: 'payment-service',
+                        type: 'latency',
+                        icon: 'fa-solid fa-hourglass-half',
+                        color: 'amber',
+                        description: 'Adds artificial delay (5s or 10s) to payment processing while preserving payment execution.',
+                        hasLatency: true,
+                        hasSpike: false
+                    }
+                ];
+            }
+            %>
+
+            <% scenarios.forEach(function(s) { %>
+                <div class="bg-slate-800/90 rounded-2xl p-5 border border-slate-700/80 flex flex-col justify-between hover:border-slate-600 transition" 
+                     id="card-<%= s.id %>"
+                     data-scenario-id="<%= s.id %>"
+                     data-service="<%= s.service %>"
+                     data-type="<%= s.type %>"
+                     data-source="<%= s.sourceService || '' %>"
+                     data-operation="<%= s.targetOperation || '*' %>">
+                    
+                    <div>
+                        <!-- Title & Status Badge -->
+                        <div class="flex items-start justify-between gap-3 mb-2">
+                            <div class="flex items-center gap-2">
+                                <span class="text-sm font-black text-white flex items-center gap-2">
+                                    <i class="<%= s.icon %> text-<%= s.color %>-400"></i> <%= s.name %>
+                                </span>
+                            </div>
+                            <span id="badge-<%= s.id %>" class="px-2.5 py-1 rounded-xl text-[11px] font-bold tracking-wide uppercase bg-slate-700 text-slate-300 border border-slate-600 shrink-0">
+                                INACTIVE
+                            </span>
+                        </div>
+
+                        <!-- Description -->
+                        <p class="text-xs text-slate-300/80 leading-relaxed mb-4">
+                            <%= s.description %>
+                        </p>
+
+                        <!-- Controls Row -->
+                        <div class="bg-slate-900/70 p-3 rounded-xl border border-slate-700/60 mb-4 space-y-2 text-xs">
+                            <div class="flex items-center justify-between text-slate-400">
+                                <span>Target Service:</span>
+                                <span class="font-mono text-indigo-300 font-semibold"><%= s.service %></span>
+                            </div>
+
+                            <% if (s.hasLatency) { %>
+                                <div class="flex items-center justify-between">
+                                    <span class="text-slate-400">Injected Delay:</span>
+                                    <select id="delay-<%= s.id %>" class="bg-slate-800 border border-slate-600 text-white rounded-lg px-2 py-1 text-xs focus:ring-1 focus:ring-indigo-500 outline-none">
+                                        <option value="5000">5 Seconds</option>
+                                        <option value="10000">10 Seconds</option>
+                                    </select>
+                                </div>
+                            <% } %>
+
+                            <% if (s.hasSpike) { %>
+                                <div class="flex items-center justify-between">
+                                    <span class="text-slate-400">Request Volume:</span>
+                                    <select id="spike-count-<%= s.id %>" class="bg-slate-800 border border-slate-600 text-white rounded-lg px-2 py-1 text-xs focus:ring-1 focus:ring-indigo-500 outline-none">
+                                        <option value="20">20 Requests (Concurrency: 5)</option>
+                                        <option value="50" selected>50 Requests (Concurrency: 5)</option>
+                                        <option value="100">100 Requests (Concurrency: 10)</option>
+                                    </select>
+                                </div>
+                            <% } %>
+
+                            <% if (!s.hasSpike) { %>
+                                <div class="flex items-center justify-between">
+                                    <span class="text-slate-400">Rule Duration:</span>
+                                    <select id="duration-<%= s.id %>" class="bg-slate-800 border border-slate-600 text-white rounded-lg px-2 py-1 text-xs focus:ring-1 focus:ring-indigo-500 outline-none">
+                                        <option value="30">30 Seconds</option>
+                                        <option value="60" selected>60 Seconds (1 Min)</option>
+                                        <option value="120">120 Seconds (2 Min)</option>
+                                        <option value="300">300 Seconds (5 Min Max)</option>
+                                    </select>
+                                </div>
+                            <% } %>
+
+                            <!-- Status / Expiration Info -->
+                            <div class="pt-2 border-t border-slate-700/60 flex items-center justify-between text-[11px] text-slate-400" id="info-<%= s.id %>">
+                                <span id="info-text-<%= s.id %>">Status: Ready to activate</span>
+                                <span id="info-time-<%= s.id %>" class="font-mono text-slate-500"></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Action Buttons -->
+                    <div class="flex items-center gap-2 pt-1">
+                        <% if (s.hasSpike) { %>
+                            <button type="button" 
+                                    id="btn-run-<%= s.id %>"
+                                    onclick="runTrafficSpike('<%= s.id %>', '<%= s.service %>')"
+                                    class="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-3 rounded-xl text-xs transition flex items-center justify-center gap-1.5 shadow-md">
+                                <i class="fa-solid fa-play"></i> Run Traffic Spike
+                            </button>
+                        <% } else { %>
+                            <button type="button" 
+                                    id="btn-act-<%= s.id %>"
+                                    onclick="activateScenario('<%= s.id %>')"
+                                    class="flex-1 bg-amber-600 hover:bg-amber-500 text-white font-bold py-2 px-3 rounded-xl text-xs transition flex items-center justify-center gap-1.5 shadow-md">
+                                <i class="fa-solid fa-play"></i> Activate
+                            </button>
+                            <button type="button" 
+                                    id="btn-deact-<%= s.id %>"
+                                    onclick="deactivateScenario('<%= s.id %>')"
+                                    disabled
+                                    class="bg-slate-700 hover:bg-red-700 text-slate-400 hover:text-white font-bold py-2 px-3 rounded-xl text-xs transition flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:hover:bg-slate-700 disabled:hover:text-slate-400">
+                                <i class="fa-solid fa-stop"></i> Deactivate
+                            </button>
+                        <% } %>
+                    </div>
+
+                </div>
+            <% }); %>
+
+        </div>
+
+        <!-- Footer / Instructions -->
+        <div class="mt-6 pt-4 border-t border-indigo-900/60 flex flex-col sm:flex-row items-center justify-between text-[11px] text-indigo-300/70 gap-2">
+            <span class="flex items-center gap-1.5">
+                <i class="fa-solid fa-circle-info text-indigo-400"></i>
+                Activating a rule sets status to ACTIVE. It transitions to TRIGGERED when an actual request experiences the injected failure.
+            </span>
+            <a href="http://localhost:5173" target="_blank" class="text-indigo-400 hover:text-white underline font-semibold flex items-center gap-1">
+                Open IntelliTrace Dashboard <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i>
+            </a>
+        </div>
+
+    </div>
+</div>
+
+<script>
+(function() {
+    const activeRulesState = new Map();
+
+    async function pollSimulationStatus() {
+        if (typeof document !== 'undefined' && document.hidden) return;
+        try {
+            const res = await fetch('/developer/failure-injections/status');
+            if (!res.ok) return;
+            const body = await res.json();
+            const activeList = body.data || [];
+
+            let activeCount = 0;
+            const activeTypesMap = new Map();
+
+            for (const rule of activeList) {
+                activeCount++;
+                const key = `${rule.targetService}:${rule.failureType}`;
+                activeTypesMap.set(key, rule);
+            }
+
+            // Update badge in header
+            const countText = document.getElementById('dev-active-count-text');
+            const indicator = document.getElementById('dev-status-indicator');
+            if (countText) countText.textContent = `${activeCount} Active ${activeCount === 1 ? 'Rule' : 'Rules'}`;
+            if (indicator) {
+                if (activeCount > 0) {
+                    indicator.className = 'w-2 h-2 rounded-full bg-amber-400 animate-ping';
+                } else {
+                    indicator.className = 'w-2 h-2 rounded-full bg-slate-500';
+                }
+            }
+
+            // Update individual cards
+            const cards = document.querySelectorAll('[data-scenario-id]');
+            cards.forEach(card => {
+                const sId = card.getAttribute('data-scenario-id');
+                const svc = card.getAttribute('data-service');
+                const fType = card.getAttribute('data-type');
+                if (fType === 'traffic_spike') return; // Handled separately
+
+                const key = `${svc}:${fType}`;
+                const rule = activeTypesMap.get(key);
+
+                const badge = document.getElementById(`badge-${sId}`);
+                const infoText = document.getElementById(`info-text-${sId}`);
+                const infoTime = document.getElementById(`info-time-${sId}`);
+                const actBtn = document.getElementById(`btn-act-${sId}`);
+                const deactBtn = document.getElementById(`btn-deact-${sId}`);
+
+                if (rule) {
+                    activeRulesState.set(sId, rule);
+                    const now = Date.now();
+                    const expires = new Date(rule.expiresAt).getTime();
+                    const remainingSec = Math.max(0, Math.round((expires - now) / 1000));
+
+                    if (rule.status === 'TRIGGERED') {
+                        badge.className = 'px-2.5 py-1 rounded-xl text-[11px] font-bold tracking-wide uppercase bg-red-600/30 text-red-300 border border-red-500';
+                        badge.innerHTML = '<i class="fa-solid fa-radiation mr-1"></i> TRIGGERED';
+                        infoText.innerHTML = `<span class="text-red-400 font-semibold">Failure triggered ${rule.triggerCount || 1} time(s)</span>`;
+                        infoTime.textContent = `Expires in ${remainingSec}s`;
+                    } else {
+                        badge.className = 'px-2.5 py-1 rounded-xl text-[11px] font-bold tracking-wide uppercase bg-amber-500/30 text-amber-300 border border-amber-500 animate-pulse';
+                        badge.innerHTML = '<i class="fa-solid fa-hourglass-start mr-1"></i> ACTIVE (Waiting)';
+                        infoText.innerHTML = '<span class="text-amber-300">Waiting for matching request...</span>';
+                        infoTime.textContent = `Expires in ${remainingSec}s`;
+                    }
+
+                    if (actBtn) actBtn.disabled = true;
+                    if (deactBtn) deactBtn.disabled = false;
+                } else {
+                    const prevState = activeRulesState.get(sId);
+                    if (prevState && (prevState.status === 'ACTIVE' || prevState.status === 'TRIGGERED')) {
+                        badge.className = 'px-2.5 py-1 rounded-xl text-[11px] font-bold tracking-wide uppercase bg-yellow-600/30 text-yellow-300 border border-yellow-600';
+                        badge.textContent = 'EXPIRED';
+                        infoText.textContent = 'Simulation completed & expired';
+                        infoTime.textContent = '';
+                    } else if (!activeRulesState.has(sId)) {
+                        badge.className = 'px-2.5 py-1 rounded-xl text-[11px] font-bold tracking-wide uppercase bg-slate-700 text-slate-300 border border-slate-600';
+                        badge.textContent = 'INACTIVE';
+                        infoText.textContent = 'Status: Ready to activate';
+                        infoTime.textContent = '';
+                    }
+                    if (actBtn) actBtn.disabled = false;
+                    if (deactBtn) deactBtn.disabled = true;
+                }
+            });
+        } catch (_) {}
+    }
+
+    // Activate Scenario
+    window.activateScenario = async function(scenarioId) {
+        const card = document.getElementById(`card-${scenarioId}`);
+        if (!card) return;
+
+        const svc = card.getAttribute('data-service');
+        const fType = card.getAttribute('data-type');
+        const src = card.getAttribute('data-source') || null;
+        const op = card.getAttribute('data-operation') || '*';
+
+        const delaySelect = document.getElementById(`delay-${scenarioId}`);
+        const durationSelect = document.getElementById(`duration-${scenarioId}`);
+        const delayMs = delaySelect ? parseInt(delaySelect.value, 10) : 0;
+        const durationSeconds = durationSelect ? parseInt(durationSelect.value, 10) : 60;
+
+        const badge = document.getElementById(`badge-${scenarioId}`);
+        const infoText = document.getElementById(`info-text-${scenarioId}`);
+        badge.className = 'px-2.5 py-1 rounded-xl text-[11px] font-bold tracking-wide uppercase bg-blue-600/30 text-blue-300 border border-blue-500 animate-pulse';
+        badge.textContent = 'ACTIVATING...';
+        infoText.textContent = 'Contacting failure injection runtime...';
+
+        try {
+            const res = await fetch('/developer/failure-injections/activate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    targetService: svc,
+                    failureType: fType,
+                    targetRoute: op,
+                    delayMs,
+                    durationSeconds,
+                    sourceService: src,
+                    description: `Dev activated ${fType} simulation`
+                })
+            });
+
+            const data = await res.json();
+            if (data.success) {
+                badge.className = 'px-2.5 py-1 rounded-xl text-[11px] font-bold tracking-wide uppercase bg-amber-500/30 text-amber-300 border border-amber-500 animate-pulse';
+                badge.innerHTML = '<i class="fa-solid fa-hourglass-start mr-1"></i> ACTIVE (Waiting)';
+                infoText.innerHTML = '<span class="text-amber-300">Rule active! Perform a matching operation.</span>';
+                activeRulesState.set(scenarioId, data.data);
+                pollSimulationStatus();
+            } else {
+                badge.className = 'px-2.5 py-1 rounded-xl text-[11px] font-bold tracking-wide uppercase bg-red-600/30 text-red-300 border border-red-500';
+                badge.textContent = 'FAILED';
+                infoText.textContent = data.message || 'Activation failed';
+            }
+        } catch (err) {
+            badge.className = 'px-2.5 py-1 rounded-xl text-[11px] font-bold tracking-wide uppercase bg-red-600/30 text-red-300 border border-red-500';
+            badge.textContent = 'ERROR';
+            infoText.textContent = err.message;
+        }
+    };
+
+    // Deactivate Scenario
+    window.deactivateScenario = async function(scenarioId) {
+        const card = document.getElementById(`card-${scenarioId}`);
+        if (!card) return;
+
+        const svc = card.getAttribute('data-service');
+        const badge = document.getElementById(`badge-${scenarioId}`);
+        const infoText = document.getElementById(`info-text-${scenarioId}`);
+
+        try {
+            const res = await fetch('/developer/failure-injections/deactivate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ targetService: svc })
+            });
+
+            badge.className = 'px-2.5 py-1 rounded-xl text-[11px] font-bold tracking-wide uppercase bg-zinc-700 text-zinc-300 border border-zinc-600';
+            badge.textContent = 'DEACTIVATED';
+            infoText.textContent = 'Rule deactivated immediately.';
+            activeRulesState.delete(scenarioId);
+            setTimeout(pollSimulationStatus, 500);
+        } catch (err) {
+            infoText.textContent = 'Deactivation error: ' + err.message;
+        }
+    };
+
+    // Run Traffic Spike
+    window.runTrafficSpike = async function(scenarioId, targetService) {
+        const countSelect = document.getElementById(`spike-count-${scenarioId}`);
+        const count = countSelect ? parseInt(countSelect.value, 10) : 50;
+        const concurrency = count > 50 ? 10 : 5;
+
+        const badge = document.getElementById(`badge-${scenarioId}`);
+        const infoText = document.getElementById(`info-text-${scenarioId}`);
+        const runBtn = document.getElementById(`btn-run-${scenarioId}`);
+
+        if (runBtn) runBtn.disabled = true;
+        badge.className = 'px-2.5 py-1 rounded-xl text-[11px] font-bold tracking-wide uppercase bg-blue-600/30 text-blue-300 border border-blue-500 animate-pulse';
+        badge.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> RUNNING';
+        infoText.innerHTML = `<span class="text-blue-300">Sending ${count} concurrent requests to ${targetService}...</span>`;
+
+        try {
+            const res = await fetch('/developer/failure-injections/traffic-spike', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    targetService,
+                    requestCount: count,
+                    concurrency
+                })
+            });
+
+            const data = await res.json();
+            if (data.success) {
+                badge.className = 'px-2.5 py-1 rounded-xl text-[11px] font-bold tracking-wide uppercase bg-emerald-600/30 text-emerald-300 border border-emerald-500';
+                badge.innerHTML = '<i class="fa-solid fa-check mr-1"></i> COMPLETED';
+                infoText.innerHTML = `<span class="text-emerald-300 font-semibold">${data.successful}/${data.totalRequests} OK</span> in ${data.durationMs}ms (avg: ${data.avgLatencyMs}ms)`;
+            } else {
+                badge.className = 'px-2.5 py-1 rounded-xl text-[11px] font-bold tracking-wide uppercase bg-red-600/30 text-red-300 border border-red-500';
+                badge.textContent = 'FAILED';
+                infoText.textContent = data.message || 'Spike simulation failed';
+            }
+        } catch (err) {
+            badge.className = 'px-2.5 py-1 rounded-xl text-[11px] font-bold tracking-wide uppercase bg-red-600/30 text-red-300 border border-red-500';
+            badge.textContent = 'ERROR';
+            infoText.textContent = err.message;
+        } finally {
+            if (runBtn) runBtn.disabled = false;
+        }
+    };
+
+    // Initial poll & periodic poll every 5s (paused when tab hidden)
+    pollSimulationStatus();
+    setInterval(pollSimulationStatus, 5000);
+    if (typeof document !== 'undefined') {
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) pollSimulationStatus();
+        });
+    }
+})();
+</script>

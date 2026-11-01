@@ -6,6 +6,7 @@ const errorHandler = require('./middleware/errorHandler');
 const authRouter = require('./routes/authRouter');
 const applicationRouter = require('./routes/applicationRouter');
 const telemetryRouter = require('./routes/telemetryRouter');
+const traceRouter = require('./routes/traceRouter');
 
 const app = express();
 
@@ -22,17 +23,23 @@ app.use(express.urlencoded({ extended: true }));
 app.use(requestLogger);
 
 // Health check
-app.get('/api/health', (req, res) => {
+const healthHandler = (req, res) => {
     res.status(200).json({
         status: 'healthy',
         service: 'intellitrace',
         timestamp: new Date().toISOString()
     });
-});
+};
+app.get('/api/health', healthHandler);
+app.get('/health', healthHandler);
 
 // Routes
+const failureInjectionRouter = require('./routes/failureInjectionRouter');
 app.use('/api/auth', authRouter);
 app.use('/api/applications', applicationRouter);
+app.use('/api/traces', traceRouter);
+app.use('/api/v1/failure-injections', failureInjectionRouter);
+app.use('/api/failure-injections', failureInjectionRouter);
 app.use('/api/v1', telemetryRouter);
 
 // Centralized error handling

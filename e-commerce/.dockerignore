@@ -1,0 +1,11 @@
+node_modules
+npm-debug.log
+logs
+.env
+.env.local
+.git
+.gitignore
+services/product-service/node_modules
+services/cart-service/node_modules
+services/order-service/node_modules
+services/payment-service/node_modules

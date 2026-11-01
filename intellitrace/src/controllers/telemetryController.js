@@ -4,18 +4,28 @@ const Log = require('../models/Log');
 exports.heartbeat = async (req, res, next) => {
     try {
         const { application, environment, status, baseUrl } = req.body;
-        const app = await Application.findOne({ slug: application, environment });
+        const nameMap = {
+            'intellishop': 'IntelliShop',
+            'intellishop-product-service': 'Product Service',
+            'intellishop-cart-service': 'Cart Service',
+            'intellishop-order-service': 'Order Service',
+            'intellishop-payment-service': 'Payment Service'
+        };
+        const appName = nameMap[application] || application;
+
+        const app = await Application.findOne({ slug: application });
         
         if (app) {
             app.lastHeartbeat = new Date();
             if (status) app.status = status;
             if (baseUrl) app.baseUrl = baseUrl;
+            if (environment) app.environment = environment;
+            if (appName && (app.name === application || !app.name)) app.name = appName;
             await app.save();
         } else {
-            // For Phase 5, if it doesn't exist, we can create it or just log it
-            // Let's create it automatically for ease of integration
+            // Automatically register application from incoming heartbeat
             const newApp = new Application({
-                name: application,
+                name: appName,
                 slug: application,
                 environment: environment || 'development',
                 status: status || 'unknown',
@@ -66,7 +76,11 @@ exports.getLogs = async (req, res, next) => {
     try {
         const { application, level, environment, search, page = 1, limit = 50, range = '24h' } = req.query;
         let query = {};
-        if (application) query.service = application;
+        if (application) {
+            const bare = application.replace('intellishop-', '');
+            const prefixed = application.startsWith('intellishop-') ? application : `intellishop-${application}`;
+            query.service = { $in: [application, bare, prefixed] };
+        }
         if (level && level !== 'ALL') query.level = level;
         if (environment) query.environment = environment;
         

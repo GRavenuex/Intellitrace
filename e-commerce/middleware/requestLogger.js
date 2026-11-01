@@ -5,6 +5,16 @@ const requestLogger = (req, res, next) => {
     metrics.httpRequestsInFlight.inc();
     let isFinished = false;
 
+    try {
+        const { trace } = require('@opentelemetry/api');
+        const activeSpan = trace.getActiveSpan();
+        if (activeSpan) {
+            const ctx = activeSpan.spanContext();
+            req.traceId = ctx.traceId;
+            req.spanId = ctx.spanId;
+        }
+    } catch (_) {}
+
     const onFinish = () => {
         if (isFinished) return;
         isFinished = true;
@@ -42,7 +52,9 @@ const requestLogger = (req, res, next) => {
             statusCode: res.statusCode,
             responseTime: responseTime,
             userId: userId,
-            userAgent: req.get('user-agent')
+            userAgent: req.get('user-agent'),
+            traceId: req.traceId,
+            spanId: req.spanId
         };
 
         if (level === 'ERROR') {

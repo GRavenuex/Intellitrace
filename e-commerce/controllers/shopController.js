@@ -1,16 +1,14 @@
-const Product = require('../models/product');
-const Cart = require('../models/cart');
-const Order = require('../models/order');
-const Payment = require('../models/payment');
-const Notification = require('../models/notification');
 const logger = require('../middleware/logger');
-const product = require('../models/product');
 const metrics = require('../utils/metrics');
-
+const productClient = require('../utils/serviceClients/productClient');
+const cartClient = require('../utils/serviceClients/cartClient');
+const orderClient = require('../utils/serviceClients/orderClient');
+const paymentClient = require('../utils/serviceClients/paymentClient');
 
 exports.getHome = async (req, res, next) => {
     try {
-        const featuredProducts = await Product.find().sort({ rating: -1 }).limit(8);
+        const response = await productClient.getFeaturedProducts(8, req.requestId);
+        const featuredProducts = response.data || [];
         const categories = ['Laptops', 'Smartphones', 'Headphones', 'Keyboards', 'Mice', 'Monitors', 'Accessories'];
         
         res.render('store/index', {
@@ -38,27 +36,14 @@ exports.getProducts = async (req, res, next) => {
         const maxPrice = parseFloat(req.query.maxPrice) || Infinity;
         const sort = req.query.sort || 'newest';
 
-        let query = {};
-
-        if (search) {
-            query.name = { $regex: search, $options: 'i' };
-        }
-        if (category) {
-            query.category = category;
-        }
-        if (minPrice > 0 || maxPrice < Infinity) {
-            query.price = { $gte: minPrice, $lte: maxPrice };
-        }
-
-        let sortOption = { createdAt: -1 };
-        if (sort === 'price-asc') sortOption = { price: 1 };
-        if (sort === 'price-desc') sortOption = { price: -1 };
-        if (sort === 'rating') sortOption = { rating: -1 };
-
-        const products = await Product.find(query).sort(sortOption);
+        const response = await productClient.getProducts({
+            search, category, minPrice, maxPrice, sort
+        }, req.requestId);
+        
+        const products = response.data || [];
         const categories = ['Laptops', 'Smartphones', 'Headphones', 'Keyboards', 'Mice', 'Monitors', 'Accessories'];
 
-        logger.info("Products fetched", { 
+        logger.info("Products fetched from Product Service", { 
             requestId: req.requestId, 
             count: products.length 
         });
@@ -90,19 +75,20 @@ exports.getProducts = async (req, res, next) => {
 exports.getProductDetails = async(req , res ,  next)=>{
     try{
         const productId = req.params.id;
-        const product  = await Product.findById(productId);
+        
+        const response = await productClient.getProductById(productId, req.requestId);
+        const product = response.data;
+        
         if(!product){
-            logger.warn("Product not found", {
+            logger.warn("Product not found via service", {
                 requestId: req.requestId,
                 productId
             });
             return res.redirect('/products');
         }
-        const relatedProducts = await Product.find({
-            category:product.category,
-            _id:{$ne:product._id}
-
-        }).limit(4);
+        
+        const relatedResponse = await productClient.getRelatedProducts(productId, req.requestId);
+        const relatedProducts = relatedResponse.data || [];
 
         logger.info("Product fetched", { 
             requestId: req.requestId, 
@@ -113,7 +99,7 @@ exports.getProductDetails = async(req , res ,  next)=>{
             currentPage  :'products',
             product,
             relatedProducts,
-            isLoggedIn:res.isLoggedIn,
+            isLoggedIn:req.isLoggedIn,
             user: req.session.user
         });
 
@@ -134,12 +120,8 @@ exports.getProductDetails = async(req , res ,  next)=>{
 exports.getCart = async(req ,res , next )=> {
     try{
         const userId = req.session.user.id;
-        let cart =  await Cart.findOne({userId}).populate('items.productId');
-
-        if(!cart){
-            cart  = new Cart({userId , items :[], totalAmount:0});
-            await cart.save();
-        }
+        const response = await cartClient.getCart(userId, req.requestId);
+        const cart = response.data;
         
         logger.info("Cart retrieved", {
             requestId: req.requestId,
@@ -173,38 +155,16 @@ exports.postAddToCart = async (req, res , next)=>{
         const userId = req.session.user.id;
         const productId = req.body.productId;
         const quantity = parseInt(req.body.quantity) || 1;
-        const product= await Product.findById(productId);
-        if(!product){
-            logger.warn("Attempting to add non-existing product to the cart",{productId});
-            return res.redirect('/products');
-        }
-        let cart = await Cart.findOne({userId});
-        if(!cart){
-            cart = new Cart({userId , items:[], totalAmount:0});
-        }
-        const itemIndex = cart.items.findIndex(item => item.productId.toString() === productId);
-        if(itemIndex > -1){
-            cart.items[itemIndex].quantity += quantity;
-        }
-        else{
-            cart.items.push({
-                productId : product._id,
-                quantity : quantity,
-                price : product.price
+        
+        await cartClient.addToCart(userId, productId, quantity, req.requestId);
 
-            });
-            cart.calculateTotal();
-            await cart.save();
-            metrics.cartOperationsTotal.inc({ operation: 'add' });
-
-            logger.info("Product added to cart", {
-                requestId: req.requestId,
-                userId, 
-                productId,  
-                quantity 
-            });
-            res.redirect('/cart');
-        }
+        logger.info("Product added to cart", {
+            requestId: req.requestId,
+            userId, 
+            productId,  
+            quantity 
+        });
+        res.redirect('/cart');
 
     }catch(err){
         logger.error("Cart operation failure", {
@@ -225,23 +185,9 @@ exports.postUpdateCart = async(req , res , next)=>{
         const userId = req.session.user.id;
         const productId = req.params.productId || req.body.productId;
         const quantity = parseInt(req.body.quantity);
-        let cart = await Cart.findOne({userId});
-        if(!cart){
-            return res.redirect('/cart');
-        }
-        const itemIndex = cart.items.findIndex(item =>item.productId.toString() === productId );
-        if(itemIndex >-1 ){
-            if(quantity<=0){
-                cart.items.splice(itemIndex , 1);
-            }
-            else{
-                cart.items[itemIndex].quantity = quantity;
-
-            }
-            cart.calculateTotal();
-            await cart.save();
-            metrics.cartOperationsTotal.inc({ operation: 'update' });
-        }
+        
+        await cartClient.updateCartItem(userId, productId, quantity, req.requestId);
+        
         logger.info("Cart updated", { 
             requestId: req.requestId,
             userId,
@@ -267,18 +213,12 @@ exports.postRemoveFromCart = async (req, res, next) => {
         const userId = req.session.user.id;
         const productId = req.params.productId || req.body.productId;
 
-        let cart = await Cart.findOne({ userId });
-        if (cart) {
-            cart.items = cart.items.filter(item => item.productId.toString() !== productId);
-            cart.calculateTotal();
-            await cart.save();
-            metrics.cartOperationsTotal.inc({ operation: 'remove' });
-            logger.info("Product removed from cart", { 
-                requestId: req.requestId,
-                userId, 
-                productId 
-            });
-        }
+        await cartClient.removeCartItem(userId, productId, req.requestId);
+        logger.info("Product removed from cart", { 
+            requestId: req.requestId,
+            userId, 
+            productId 
+        });
 
         res.redirect('/cart');
     } catch (err) {
@@ -297,7 +237,8 @@ exports.postRemoveFromCart = async (req, res, next) => {
 exports.getCheckout = async (req, res, next) => {
     try {
         const userId = req.session.user.id;
-        const cart = await Cart.findOne({ userId }).populate('items.productId');
+        const response = await cartClient.getCart(userId, req.requestId);
+        const cart = response.data;
 
         if (!cart || cart.items.length === 0) {
             return res.redirect('/cart');
@@ -328,30 +269,33 @@ exports.postCreateOrder = async (req, res, next) => {
             userId
         });
 
-        const cart = await Cart.findOne({ userId }).populate('items.productId');
+        const response = await cartClient.getCart(userId, req.requestId);
+        const cart = response.data;
+        
         if (!cart || cart.items.length === 0) {
             return res.redirect('/cart');
         }
 
         const orderItems = cart.items.map(item => ({
-            productId: item.productId._id,
-            name: item.productId.name,
-            image: item.productId.image,
+            productId: item.productId,
+            name: item.productName || 'Unknown Product',
+            image: item.productImage || '',
             quantity: item.quantity,
             price: item.price
         }));
 
-        const order = new Order({
+        const orderData = {
             userId,
             items: orderItems,
             totalAmount: cart.totalAmount,
             shippingAddress: { fullName, address, city, state, pincode, phone },
             paymentStatus: 'pending',
             orderStatus: 'pending'
-        });
+        };
 
-        await order.save();
-        metrics.ordersCreatedTotal.inc();
+        const responseOrder = await orderClient.createOrder(orderData, req.requestId);
+        const order = responseOrder.data;
+
         logger.info("Order created", { 
             requestId: req.requestId,
             userId,
@@ -366,7 +310,19 @@ exports.postCreateOrder = async (req, res, next) => {
             error: err.message,
             stack: err.stack 
         });
-        next(err);
+        try {
+            const cartRes = await cartClient.getCart(req.session.user.id, req.requestId);
+            return res.render('store/checkout', {
+                pageTitle: 'Checkout - IntelliShop',
+                currentPage: 'checkout',
+                cart: cartRes.data || { items: [], totalAmount: 0 },
+                errorMessage: `Order could not be placed: ${err.message || 'Service failure encountered'}. You can retry or check Developer Controls.`,
+                isLoggedIn: req.isLoggedIn,
+                user: req.session.user
+            });
+        } catch (_) {
+            next(err);
+        }
     }
 };
 
@@ -374,7 +330,8 @@ exports.postCreateOrder = async (req, res, next) => {
 exports.getPayment = async (req, res, next) => {
     try {
         const orderId = req.params.orderId;
-        const order = await Order.findById(orderId);
+        const response = await orderClient.getOrderById(orderId, req.requestId);
+        const order = response.data;
 
         if (!order) {
             logger.warn("Order not found for payment", { orderId });
@@ -400,8 +357,11 @@ exports.postProcessPayment = async (req, res, next) => {
         const orderId = req.body.orderId;
         const paymentResult = req.body.paymentResult || 'SUCCESS'; // 'SUCCESS' or 'FAILURE'
         const paymentMethod = req.body.paymentMethod || 'Mock Card';
+        const userId = req.session.user.id;
 
-        const order = await Order.findById(orderId);
+        const responseOrder = await orderClient.getOrderById(orderId, req.requestId);
+        const order = responseOrder.data;
+        
         if (!order) {
             return res.redirect('/orders');
         }
@@ -410,31 +370,10 @@ exports.postProcessPayment = async (req, res, next) => {
             requestId: req.requestId,
             orderId 
         });
-        metrics.paymentsStartedTotal.inc();
-
-        const transactionId = 'TXN-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
-
-        if (paymentResult === 'FAILURE') {
-            logger.error("Payment failed", { 
-                requestId: req.requestId,
-                orderId, 
-                error: "Simulated payment transaction failure" 
-            });
-
-            const payment = new Payment({
-                orderId: order._id,
-                userId: order.userId,
-                amount: order.totalAmount,
-                status: 'failed',
-                transactionId,
-                paymentMethod
-            });
-            await payment.save();
-            metrics.paymentsFailedTotal.inc();
-
-            order.paymentStatus = 'failed';
-            await order.save();
-
+        
+        try {
+            await paymentClient.processPayment({ orderId, simulateResult: paymentResult, paymentMethod, userId }, req.requestId);
+        } catch (paymentErr) {
             return res.render('store/payment', {
                 pageTitle: 'Mock Payment - IntelliShop',
                 currentPage: 'payment',
@@ -444,41 +383,7 @@ exports.postProcessPayment = async (req, res, next) => {
                 user: req.session.user
             });
         }
-
-        // Payment Success Flow
-        const payment = new Payment({
-            orderId: order._id,
-            userId: order.userId,
-            amount: order.totalAmount,
-            status: 'success',
-            transactionId,
-            paymentMethod
-        });
-        await payment.save();
-        metrics.paymentsSuccessTotal.inc();
-
-        order.paymentStatus = 'success';
-        order.orderStatus = 'confirmed';
-        await order.save();
-
-        // Clear Cart
-        await Cart.findOneAndUpdate({ userId: order.userId }, { items: [], totalAmount: 0 });
-
-        // Create Notification
-        const notification = new Notification({
-            userId: order.userId,
-            orderId: order._id,
-            message: `Your order #${order._id.toString().slice(-6)} has been placed successfully!`,
-            type: 'order',
-            status: 'unread'
-        });
-        await notification.save();
-
-        logger.info("Payment successful", { 
-            requestId: req.requestId,
-            orderId 
-        });
-
+        
         res.redirect(`/order-confirmation/${order._id}`);
     } catch (err) {
         logger.error("Payment processing error", { 
@@ -495,7 +400,8 @@ exports.postProcessPayment = async (req, res, next) => {
 exports.getOrderConfirmation = async (req, res, next) => {
     try {
         const orderId = req.params.orderId;
-        const order = await Order.findById(orderId);
+        const response = await orderClient.getOrderById(orderId, req.requestId);
+        const order = response.data;
 
         if (!order) {
             return res.redirect('/orders');
@@ -518,7 +424,8 @@ exports.getOrderConfirmation = async (req, res, next) => {
 exports.getMyOrders = async (req, res, next) => {
     try {
         const userId = req.session.user.id;
-        const orders = await Order.find({ userId }).sort({ createdAt: -1 });
+        const response = await orderClient.getOrders(userId, req.requestId);
+        const orders = response.data || [];
 
         res.render('store/orders', {
             pageTitle: 'My Orders - IntelliShop',
@@ -537,7 +444,8 @@ exports.getMyOrders = async (req, res, next) => {
 exports.getOrderDetail = async (req, res, next) => {
     try {
         const orderId = req.params.id;
-        const order = await Order.findById(orderId);
+        const response = await orderClient.getOrderById(orderId, req.requestId);
+        const order = response.data;
 
         if (!order) {
             return res.redirect('/orders');

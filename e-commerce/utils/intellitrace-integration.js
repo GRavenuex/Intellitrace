@@ -1,6 +1,6 @@
 const http = require('http');
 
-const INTELLITRACE_URL = 'http://localhost:4000/api/v1';
+const INTELLITRACE_URL = process.env.INTELLITRACE_URL || 'http://localhost:4000/api/v1';
 const API_KEY = process.env.INTELLITRACE_API_KEY || 'default_telemetry_key';
 
 const getHeaders = (dataLength) => ({
@@ -15,7 +15,7 @@ setInterval(() => {
         application: 'intellishop',
         environment: process.env.NODE_ENV || 'development',
         status: 'healthy',
-        baseUrl: 'http://localhost:3000'
+        baseUrl: process.env.SERVICE_BASE_URL || 'http://localhost:3000'
     });
 
     const req = http.request(`${INTELLITRACE_URL}/heartbeat`, {

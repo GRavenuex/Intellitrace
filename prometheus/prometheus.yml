@@ -1,0 +1,7 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: 'intellishop'
+    static_configs:
+      - targets: ['intellishop-gateway:3000', 'product-service:3001', 'cart-service:3002', 'order-service:3003', 'payment-service:3004']

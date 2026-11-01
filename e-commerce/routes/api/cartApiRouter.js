@@ -1,23 +1,18 @@
 const express = require('express');
 const router = express.Router();
-const Cart = require('../../models/cart');
-const Product = require('../../models/product');
 const { isAuth } = require('../../middleware/authMiddleware');
 const logger = require('../../middleware/logger');
-const metrics = require('../../utils/metrics');
+const cartClient = require('../../utils/serviceClients/cartClient');
 
 // GET /api/cart
 router.get('/', isAuth, async (req, res, next) => {
     try {
-        let cart = await Cart.findOne({ userId: req.session.user.id }).populate('items.productId');
-        if (!cart) {
-            cart = new Cart({ userId: req.session.user.id, items: [], totalAmount: 0 });
-            await cart.save();
-        }
+        const response = await cartClient.getCart(req.session.user.id, req.requestId);
+        const cart = response.data;
         res.status(200).json({
             success: true,
             data: cart,
-            service: 'cart-service'
+            service: 'cart-service-gateway'
         });
     } catch (err) {
         next(err);
@@ -30,36 +25,14 @@ router.post('/', isAuth, async (req, res, next) => {
         const { productId, quantity } = req.body;
         const qty = parseInt(quantity) || 1;
 
-        const product = await Product.findById(productId);
-        if (!product) {
-            return res.status(404).json({
-                success: false,
-                error: 'Product not found',
-                service: 'cart-service'
-            });
-        }
+        const response = await cartClient.addToCart(req.session.user.id, productId, qty, req.requestId);
+        const cart = response.data;
 
-        let cart = await Cart.findOne({ userId: req.session.user.id });
-        if (!cart) {
-            cart = new Cart({ userId: req.session.user.id, items: [], totalAmount: 0 });
-        }
-
-        const itemIndex = cart.items.findIndex(item => item.productId.toString() === productId);
-        if (itemIndex > -1) {
-            cart.items[itemIndex].quantity += qty;
-        } else {
-            cart.items.push({ productId: product._id, quantity: qty, price: product.price });
-        }
-
-        cart.calculateTotal();
-        await cart.save();
-        metrics.cartOperationsTotal.inc({ operation: 'add' });
-
-        logger.info(`[API] Added product to cart`, { userId: req.session.user.id, productId });
+        logger.info(`[API] Added product to cart via Gateway`, { userId: req.session.user.id, productId });
         res.status(200).json({
             success: true,
             data: cart,
-            service: 'cart-service'
+            service: 'cart-service-gateway'
         });
     } catch (err) {
         next(err);
@@ -72,31 +45,13 @@ router.put('/:productId', isAuth, async (req, res, next) => {
         const { quantity } = req.body;
         const qty = parseInt(quantity);
 
-        let cart = await Cart.findOne({ userId: req.session.user.id });
-        if (!cart) {
-            return res.status(404).json({
-                success: false,
-                error: 'Cart not found',
-                service: 'cart-service'
-            });
-        }
-
-        const itemIndex = cart.items.findIndex(item => item.productId.toString() === req.params.productId);
-        if (itemIndex > -1) {
-            if (qty <= 0) {
-                cart.items.splice(itemIndex, 1);
-            } else {
-                cart.items[itemIndex].quantity = qty;
-            }
-            cart.calculateTotal();
-            await cart.save();
-            metrics.cartOperationsTotal.inc({ operation: 'update' });
-        }
+        const response = await cartClient.updateCartItem(req.session.user.id, req.params.productId, qty, req.requestId);
+        const cart = response.data;
 
         res.status(200).json({
             success: true,
             data: cart,
-            service: 'cart-service'
+            service: 'cart-service-gateway'
         });
     } catch (err) {
         next(err);
@@ -106,18 +61,13 @@ router.put('/:productId', isAuth, async (req, res, next) => {
 // DELETE /api/cart/:productId (Remove item)
 router.delete('/:productId', isAuth, async (req, res, next) => {
     try {
-        let cart = await Cart.findOne({ userId: req.session.user.id });
-        if (cart) {
-            cart.items = cart.items.filter(item => item.productId.toString() !== req.params.productId);
-            cart.calculateTotal();
-            await cart.save();
-            metrics.cartOperationsTotal.inc({ operation: 'remove' });
-        }
+        const response = await cartClient.removeCartItem(req.session.user.id, req.params.productId, req.requestId);
+        const cart = response.data;
 
         res.status(200).json({
             success: true,
             data: cart,
-            service: 'cart-service'
+            service: 'cart-service-gateway'
         });
     } catch (err) {
         next(err);

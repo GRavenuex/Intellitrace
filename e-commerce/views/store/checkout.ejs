@@ -8,6 +8,13 @@
         <p class="text-xs text-gray-500 mt-1">Provide your delivery details to place the order</p>
     </div>
 
+    <% if (typeof errorMessage !== 'undefined' && errorMessage) { %>
+        <div class="mb-8 p-4 bg-red-50 border border-red-200 text-red-700 text-sm font-medium rounded-2xl flex items-center gap-3 shadow-sm">
+            <i class="fa-solid fa-circle-exclamation text-red-500 text-xl"></i>
+            <div><%= errorMessage %></div>
+        </div>
+    <% } %>
+
     <form action="/checkout/create-order" method="POST" class="grid grid-cols-1 lg:grid-cols-3 gap-8">
         
         <!-- Shipping Form -->
@@ -60,12 +67,15 @@
             <h2 class="text-lg font-bold text-gray-900 border-b border-gray-100 pb-3">Order Items (<%= cart.items.length %>)</h2>
 
             <div class="space-y-3 max-h-60 overflow-y-auto pr-1">
-                <% cart.items.forEach(function(item) { %>
+                <% cart.items.forEach(function(item) { 
+                    const pName = item.productName || (item.productId && item.productId.name) || 'Product';
+                    const pImage = item.productImage || (item.productId && item.productId.image) || '';
+                %>
                     <div class="flex items-center justify-between text-xs py-1 border-b border-gray-50">
                         <div class="flex items-center gap-2">
-                            <img src="<%= item.productId.image %>" class="w-10 h-10 object-contain bg-gray-50 p-1 rounded-lg">
+                            <img src="<%= pImage %>" class="w-10 h-10 object-contain bg-gray-50 p-1 rounded-lg">
                             <div>
-                                <span class="font-bold text-gray-800 line-clamp-1"><%= item.productId.name %></span>
+                                <span class="font-bold text-gray-800 line-clamp-1"><%= pName %></span>
                                 <span class="text-gray-400">Qty: <%= item.quantity %></span>
                             </div>
                         </div>
@@ -95,6 +105,9 @@
         </div>
 
     </form>
+
+    <!-- Developer Controls / Failure Simulation Section -->
+    <%- include('../partials/developerControls.ejs', { pageContext: 'checkout', targetService: 'order-service' }) %>
 
 </main>
 

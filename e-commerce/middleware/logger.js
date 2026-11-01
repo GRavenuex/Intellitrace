@@ -45,6 +45,18 @@ const formatLog = (level, message, meta = {}) => {
         finalMeta.requestId = store.get('requestId');
     }
 
+    try {
+        const { trace } = require('@opentelemetry/api');
+        const activeSpan = trace.getActiveSpan();
+        if (activeSpan) {
+            const spanCtx = activeSpan.spanContext();
+            if (spanCtx && spanCtx.traceId) {
+                finalMeta.traceId = spanCtx.traceId;
+                finalMeta.spanId = spanCtx.spanId;
+            }
+        }
+    } catch (_) {}
+
     const sanitizedMeta = sanitize(finalMeta);
 
     const logEntry = {

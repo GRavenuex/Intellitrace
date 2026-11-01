@@ -62,10 +62,20 @@ export default function ApplicationDetails() {
 
     if (!summary) return null;
 
-    const isHealthy = summary.status === 'healthy';
-    
-    // Status Logic (Down if heartbeat > 60s ago, unknown if never)
-    let displayStatus = summary.status.toUpperCase();
+    const formatFailureName = (type) => {
+        switch (type) {
+            case 'http_500': return 'HTTP 500 Internal Error';
+            case 'latency': return 'High Latency Delay';
+            case 'database_timeout': return 'Database Query Timeout';
+            case 'service_communication_failure': return 'Downstream Service Communication Failure';
+            case 'cascading_failure': return 'Cascading Failure';
+            case 'traffic_spike': return 'Traffic Spike Overload';
+            default: return type ? type.toUpperCase() : 'Unknown';
+        }
+    };
+
+    // Status Logic
+    let displayStatus = (summary.status || 'healthy').toUpperCase();
     if (summary.lastHeartbeat) {
         const msSinceHeartbeat = Date.now() - new Date(summary.lastHeartbeat).getTime();
         if (msSinceHeartbeat > 60000) displayStatus = 'DOWN';
@@ -121,9 +131,10 @@ export default function ApplicationDetails() {
                         <h2 className="text-lg font-bold text-gray-800">Application Overview</h2>
                     </div>
                     <span className={`px-3 py-1 text-xs font-bold rounded-full ${
-                        displayStatus === 'HEALTHY' ? 'bg-green-100 text-green-800' :
-                        displayStatus === 'DOWN' ? 'bg-red-100 text-red-800' :
-                        'bg-gray-100 text-gray-800'
+                        displayStatus === 'HEALTHY' ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' :
+                        displayStatus === 'DEGRADED' ? 'bg-amber-100 text-amber-800 border border-amber-300' :
+                        displayStatus === 'DOWN' ? 'bg-rose-100 text-rose-800 border border-rose-200' :
+                        'bg-gray-100 text-gray-800 border border-gray-200'
                     }`}>
                         {displayStatus}
                     </span>
@@ -152,6 +163,76 @@ export default function ApplicationDetails() {
                     </div>
                 </div>
             </div>
+
+            {/* Active Failure Injection Scenario Banner */}
+            {summary.activeFailure && (
+                <div className="bg-amber-50/90 border border-amber-300 rounded-xl p-5 shadow-sm space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex items-center gap-2.5">
+                            <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0" />
+                            <h3 className="font-bold text-amber-950 text-sm sm:text-base">
+                                Injected Failure Active: {formatFailureName(summary.activeFailure.failureType)}
+                            </h3>
+                            <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider ${
+                                summary.activeFailure.role === 'downstream' 
+                                    ? 'bg-purple-100 text-purple-800 border border-purple-200' 
+                                    : 'bg-rose-100 text-rose-800 border border-rose-200'
+                            }`}>
+                                {summary.activeFailure.role === 'downstream' ? 'Cascading Downstream Symptom' : 'Root Cause Origin'}
+                            </span>
+                        </div>
+                        {summary.activeFailure.relatedTraceId && (
+                            <Link 
+                                to={`/traces?traceId=${summary.activeFailure.relatedTraceId}`}
+                                className="inline-flex items-center gap-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold px-3 py-1.5 rounded-lg shadow-sm transition"
+                            >
+                                <Activity className="w-3.5 h-3.5" />
+                                Inspect Correlated Trace
+                            </Link>
+                        )}
+                    </div>
+                    <p className="text-xs text-amber-900">
+                        {summary.activeFailure.description || `Simulated failure targeting ${summary.activeFailure.targetRoute}. Service telemetry, response times and error rates actively reflect this controlled scenario.`}
+                    </p>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3 border-t border-amber-200 text-xs">
+                        <div>
+                            <span className="text-amber-800/80 block text-[10px] font-bold uppercase">Target Route</span>
+                            <span className="font-mono font-semibold text-amber-950">{summary.activeFailure.targetRoute}</span>
+                        </div>
+                        <div>
+                            <span className="text-amber-800/80 block text-[10px] font-bold uppercase">Status</span>
+                            <span className="font-bold text-amber-900">{summary.activeFailure.status}</span>
+                        </div>
+                        <div>
+                            <span className="text-amber-800/80 block text-[10px] font-bold uppercase">Trigger Count</span>
+                            <span className="font-mono font-bold text-amber-950">{summary.activeFailure.triggerCount} times</span>
+                        </div>
+                        <div>
+                            <span className="text-amber-800/80 block text-[10px] font-bold uppercase">Injected Delay</span>
+                            <span className="font-mono font-bold text-amber-950">{summary.activeFailure.delayMs ? `${summary.activeFailure.delayMs} ms` : 'N/A'}</span>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Database Query Timeout Status */}
+            {summary.dbStatus && summary.dbStatus.hasQueryTimeout && (
+                <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3 text-xs text-blue-900">
+                    <div className="flex items-center gap-2">
+                        <Server className="w-4 h-4 text-blue-600 flex-shrink-0" />
+                        <span>
+                            <strong>Database Query Timeout Injected:</strong> Application query timeout observed ({summary.dbStatus.timeoutCount} event{summary.dbStatus.timeoutCount > 1 ? 's' : ''}). 
+                            MongoDB container service remains <strong>HEALTHY (ONLINE)</strong>.
+                        </span>
+                    </div>
+                    {summary.dbStatus.latestTraceId && (
+                        <Link to={`/traces?traceId=${summary.dbStatus.latestTraceId}`} className="text-blue-700 font-bold hover:underline flex items-center gap-1">
+                            <Activity className="w-3.5 h-3.5" />
+                            View DB Trace &rarr;
+                        </Link>
+                    )}
+                </div>
+            )}
 
             {/* Top Level Metric Cards */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
@@ -263,7 +344,7 @@ export default function ApplicationDetails() {
                                 <tr>
                                     <th className="px-4 py-2">Time</th>
                                     <th className="px-4 py-2">Message</th>
-                                    <th className="px-4 py-2">Request ID</th>
+                                    <th className="px-4 py-2">Trace / Request ID</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-100">
@@ -276,12 +357,29 @@ export default function ApplicationDetails() {
                                             {err.message}
                                             {err.route && <span className="block text-gray-400 text-xs font-normal mt-0.5">{err.route}</span>}
                                         </td>
-                                        <td className="px-4 py-3 text-gray-500 text-xs font-mono">
-                                            {err.requestId ? (
-                                                <Link to={`/logs?requestId=${err.requestId}`} className="text-blue-500 hover:underline" title="View Trace">
-                                                    {err.requestId.split('-')[0]}...
-                                                </Link>
-                                            ) : '-'}
+                                        <td className="px-4 py-3 text-gray-700 text-xs font-mono">
+                                            <div className="flex flex-col gap-1">
+                                                {err.traceId ? (
+                                                    <Link 
+                                                        to={`/traces?traceId=${err.traceId}`} 
+                                                        className="text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1 hover:underline" 
+                                                        title={`Trace ID: ${err.traceId}`}
+                                                    >
+                                                        <Activity className="w-3 h-3 text-blue-500" />
+                                                        {err.traceId.slice(0, 12)}...
+                                                    </Link>
+                                                ) : null}
+                                                {err.requestId ? (
+                                                    <Link 
+                                                        to={`/logs?requestId=${err.requestId}`} 
+                                                        className="text-gray-500 hover:text-gray-800 text-[11px] hover:underline" 
+                                                        title={`Request ID: ${err.requestId}`}
+                                                    >
+                                                        req: {err.requestId.slice(0, 8)}...
+                                                    </Link>
+                                                ) : null}
+                                                {!err.traceId && !err.requestId && <span className="text-gray-400">-</span>}
+                                            </div>
                                         </td>
                                     </tr>
                                 )) : (

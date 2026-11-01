@@ -1,3 +1,4 @@
+require('./tracer');
 require('dotenv').config();
 const path = require('path');
 const express = require('express');
@@ -40,13 +41,21 @@ app.set('view engine', 'ejs');
 app.set('views', 'views');
 
 // Session MongoDB Store
+const sessionUri = process.env.SESSION_MONGO_URI || DB_Path;
 const store = new MongoDBStore({
-    uri: DB_Path,
-    collection: 'sessions'
+    uri: sessionUri,
+    collection: 'sessions',
+    connectionOptions: {
+        serverSelectionTimeoutMS: 5000
+    }
+}, function (error) {
+    if (error) {
+        logger.error("Session Store initialization error", { error: error.message });
+    }
 });
 
 store.on('error', function (error) {
-    logger.error("Session Store Error", { error });
+    logger.error("Session Store Error", { error: error ? (error.message || error) : 'Unknown error' });
 });
 
 // Middleware
@@ -109,6 +118,10 @@ app.use(multer({ storage, fileFilter }).single('photo'));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use("/uploads", express.static(path.join(rootDir, 'uploads')));
 
+// Failure Injection Middleware
+const createFailureInjector = require('./middleware/failureInjector');
+app.use(createFailureInjector({ serviceName: 'intellishop-gateway', metrics, logger }));
+
 // REST API Routes
 app.use('/api/users', userApiRouter);
 app.use('/api/products', productApiRouter);
@@ -117,6 +130,10 @@ app.use('/api/orders', orderApiRouter);
 app.use('/api/payments', paymentApiRouter);
 app.use('/api/notifications', notificationApiRouter);
 app.use('/api', failureApiRouter); // Chaos & Failure Simulation Endpoints
+
+// Developer Failure Injection Controls & Traffic Simulation
+const developerRouter = require('./routes/developerRouter');
+app.use('/developer/failure-injections', developerRouter);
 
 // View Routes
 app.use(authRouter);
@@ -163,6 +180,9 @@ if (process.env.NODE_ENV !== 'production') {
     app.use('/debug', debugRouter);
 }
 
+// Dashboard alias redirect
+app.get('/dashboard', (req, res) => res.redirect('/host/dashboard'));
+
 // 404 Page Not Found Handler
 app.use((req, res, next) => {
     res.status(404).render('404', {
@@ -177,11 +197,27 @@ app.use((req, res, next) => {
 app.use(errorHandler);
 
 // Database Connection & Server Listener
-mongoose.connect(DB_Path).then(() => {
-    logger.info("MongoDB connected");
+const connectDB = async () => {
+    try {
+        await mongoose.connect(DB_Path, { serverSelectionTimeoutMS: 3000 });
+        logger.info("MongoDB connected");
+    } catch (err) {
+        logger.warn("Atlas connection failed. Falling back to local MongoDB at mongodb://127.0.0.1:27017/ecommerce...");
+        try {
+            await mongoose.connect('mongodb://127.0.0.1:27017/ecommerce', { serverSelectionTimeoutMS: 3000 });
+            logger.info("IntelliShop connected to local MongoDB");
+        } catch (localErr) {
+            logger.error("MongoDB connection failed", { error: localErr.message });
+        }
+    }
     app.listen(PORT, () => {
         logger.info(`IntelliShop Server running on http://localhost:${PORT}`);
     });
-}).catch(err => {
-    logger.error("MongoDB connection failed", { error: err.message, stack: err.stack });
-});
+};
+connectDB();
+
+// trigger restart
+
+// triggered restart
+
+// another restart

@@ -1,6 +1,7 @@
 const Application = require('../models/Application');
 const Log = require('../models/Log');
 const MetricSnapshot = require('../models/MetricSnapshot');
+const FailureInjection = require('../models/FailureInjection');
 
 // Helper to convert range to milliseconds
 const getRangeMs = (rangeStr) => {
@@ -41,15 +42,25 @@ exports.getSummary = async (req, res, next) => {
         const rangeMs = getRangeMs(range);
         const startTime = new Date(Date.now() - rangeMs);
         
+        // Match both prefixed and bare service names for logs and metric snapshots
+        const bareName = app.slug.replace('intellishop-', '');
+        const serviceNames = Array.from(new Set([
+            app.slug,
+            bareName,
+            app.slug.replace('-service', ''),
+            bareName.replace('-service', '')
+        ]));
+        const serviceFilter = { $in: serviceNames };
+
         // Find all metric snapshots in the time window, sorted ascending for time-series chart
         const snapshots = await MetricSnapshot.find({ 
-            application: app.slug, 
+            application: { $in: [app.slug, bareName] }, 
             timestamp: { $gte: startTime } 
         }).sort('timestamp');
 
         // Also fetch the snapshot strictly right BEFORE the time window to correctly calculate the delta for the very first point
         const pastMetric = await MetricSnapshot.findOne({
-            application: app.slug,
+            application: { $in: [app.slug, bareName] },
             timestamp: { $lt: startTime }
         }).sort('-timestamp');
         
@@ -63,8 +74,18 @@ exports.getSummary = async (req, res, next) => {
 
         if (hasData) {
             const latestMetric = snapshots[snapshots.length - 1];
-            // Compare latest to the oldest available bound (either the one strictly before the window, or the very first in the window)
-            const oldestMetric = pastMetric || snapshots[0];
+            // If pastMetric exists, use it; if multiple snapshots exist, use the oldest in window; otherwise zero baseline
+            const oldestMetric = pastMetric || (snapshots.length > 1 ? snapshots[0] : {
+                requestsTotal: 0,
+                errorsTotal: 0,
+                durationSum: 0,
+                durationCount: 0,
+                ordersCreatedTotal: 0,
+                paymentsStartedTotal: 0,
+                paymentsSuccessTotal: 0,
+                paymentsFailedTotal: 0,
+                cartOperationsTotal: 0
+            });
             
             // Calculate Global Deltas
             requests = latestMetric.requestsTotal >= oldestMetric.requestsTotal ? latestMetric.requestsTotal - oldestMetric.requestsTotal : latestMetric.requestsTotal;
@@ -94,7 +115,6 @@ exports.getSummary = async (req, res, next) => {
                 let latMs = 0;
                 if (cDelta > 0) latMs = Math.round((durDelta / cDelta) * 1000);
                 
-                // Add rate per minute if we assume each snapshot covers interval (e.g. 15s)
                 requestsSeries.push({ timestamp: timestampStr, value: reqDelta });
                 errorsSeries.push({ timestamp: timestampStr, value: errDelta });
                 latencySeries.push({ timestamp: timestampStr, value: latMs });
@@ -103,23 +123,115 @@ exports.getSummary = async (req, res, next) => {
             }
         }
 
-        let errorRate = 0;
-        if (requests > 0) {
-            errorRate = ((errors / requests) * 100).toFixed(2);
+        // Get recent logs and errors matching serviceFilter
+        const recentLogs = await Log.find({ service: serviceFilter }).sort('-timestamp').limit(20);
+        const recentErrors = await Log.find({ service: serviceFilter, level: 'ERROR' }).sort('-timestamp').limit(20);
+
+        // Account for error logs occurring in this time window
+        const errorLogCount = await Log.countDocuments({ service: serviceFilter, level: 'ERROR', timestamp: { $gte: startTime } });
+        if (errorLogCount > errors) {
+            errors = errorLogCount;
+        }
+        if (requests < errors) {
+            requests = errors;
         }
 
-        // Get recent logs
-        const recentLogs = await Log.find({ service: app.slug }).sort('-timestamp').limit(15);
-        
-        // Get recent errors
-        const recentErrors = await Log.find({ service: app.slug, level: 'ERROR' }).sort('-timestamp').limit(15);
+        let errorRate = 0;
+        if (requests > 0) {
+            errorRate = ((errors / requests) * 100).toFixed(1);
+        }
+
+        // Find active failure injections targeting this service (or cascading impact)
+        const now = new Date();
+        const isOrderService = bareName === 'order-service' || app.slug === 'intellishop-order-service';
+        const isPaymentService = bareName === 'payment-service' || app.slug === 'intellishop-payment-service';
+
+        const activeFailures = await FailureInjection.find({
+            $or: [
+                { targetService: { $in: [app.slug, bareName] } },
+                isOrderService ? { failureType: 'cascading_failure', status: { $in: ['ACTIVE', 'TRIGGERED'] } } : { _id: null }
+            ],
+            status: { $in: ['ACTIVE', 'TRIGGERED'] },
+            expiresAt: { $gt: now }
+        }).sort('-createdAt');
+
+        let activeFailure = null;
+        if (activeFailures.length > 0) {
+            const primary = activeFailures[0];
+            let role = 'origin';
+            let description = primary.description || '';
+            if (primary.failureType === 'cascading_failure') {
+                if (isOrderService) {
+                    role = 'downstream';
+                    description = 'Cascading Downstream Failure: Order checkout impacted by downstream Payment Service outage';
+                } else if (isPaymentService) {
+                    role = 'origin';
+                    description = 'Cascading Failure Origin: Payment Service error causing upstream checkout failures';
+                }
+            }
+
+            // Find related traceId from recent error logs
+            const correlatedLog = recentErrors.find(e => e.traceId || e.requestId);
+            const relatedTraceId = correlatedLog ? (correlatedLog.traceId || null) : null;
+
+            activeFailure = {
+                id: primary._id,
+                failureType: primary.failureType,
+                targetRoute: primary.targetRoute,
+                delayMs: primary.delayMs,
+                status: primary.status,
+                triggerCount: primary.triggerCount || 0,
+                lastTriggeredAt: primary.lastTriggeredAt,
+                role,
+                description,
+                relatedTraceId
+            };
+        }
+
+        // Service Health Status Calculation
+        let calculatedStatus = 'healthy';
+        const lastHbMs = app.lastHeartbeat ? new Date(app.lastHeartbeat).getTime() : 0;
+        const msSinceHb = Date.now() - lastHbMs;
+
+        if (!lastHbMs || msSinceHb > 60000) {
+            calculatedStatus = 'down';
+        } else {
+            const hasTriggered = activeFailures.some(f => f.status === 'TRIGGERED' || (f.triggerCount && f.triggerCount > 0));
+            const highErrorRate = parseFloat(errorRate) > 15 && errors >= 2;
+            const highLatency = latencyMs > 2000;
+            const recentErrorsIn2m = recentErrors.filter(e => (Date.now() - new Date(e.timestamp).getTime()) < 120000).length;
+
+            if (hasTriggered || highErrorRate || recentErrorsIn2m >= 2 || highLatency) {
+                calculatedStatus = 'degraded';
+            } else if (activeFailures.length > 0) {
+                calculatedStatus = 'degraded';
+            } else {
+                calculatedStatus = 'healthy';
+            }
+        }
+
+        // Database monitoring status (detect application query timeout without marking MongoDB container down)
+        const dbTimeoutLogs = recentErrors.filter(e => 
+            e.failureType === 'DATABASE_TIMEOUT' || 
+            String(e.message).includes('MongoTimeout') ||
+            String(e.message).includes('database_timeout')
+        );
+        const hasDbTimeout = dbTimeoutLogs.length > 0;
+        const dbStatus = {
+            service: 'mongodb',
+            containerStatus: 'RUNNING',
+            hasQueryTimeout: hasDbTimeout,
+            timeoutCount: dbTimeoutLogs.length,
+            affectedOperation: hasDbTimeout ? (dbTimeoutLogs[0].targetOperation || 'find / insert') : null,
+            latestTraceId: hasDbTimeout && dbTimeoutLogs[0].traceId ? dbTimeoutLogs[0].traceId : null
+        };
 
         res.json({
             success: true,
             data: {
                 hasData,
                 application: app.slug,
-                status: app.status,
+                status: calculatedStatus,
                 environment: app.environment,
                 baseUrl: app.baseUrl,
                 lastHeartbeat: app.lastHeartbeat,
@@ -129,7 +241,7 @@ exports.getSummary = async (req, res, next) => {
                     errors: Math.max(0, errors),
                     errorRate: errorRate,
                     latencyMs: Math.max(0, latencyMs),
-                    incidents: 0,
+                    incidents: activeFailure ? 1 : 0,
                     business: {
                         orders,
                         paymentsStarted,
@@ -143,6 +255,8 @@ exports.getSummary = async (req, res, next) => {
                     errors: errorsSeries,
                     latency: latencySeries
                 },
+                activeFailure,
+                dbStatus,
                 recentLogs,
                 recentErrors
             }

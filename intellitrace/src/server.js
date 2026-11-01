@@ -9,3 +9,5 @@ connectDB().then(() => {
         startMetricsCollector();
     });
 });
+
+// trigger restart

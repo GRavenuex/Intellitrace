@@ -6,6 +6,7 @@ import Dashboard from './pages/Dashboard';
 import Applications from './pages/Applications';
 import ApplicationDetails from './pages/ApplicationDetails';
 import Logs from './pages/Logs';
+import Traces from './pages/Traces';
 
 const ProtectedRoute = ({ children }) => {
     const token = localStorage.getItem('token');
@@ -28,6 +29,7 @@ function App() {
             <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
             <Route path="/applications" element={<ProtectedRoute><Applications /></ProtectedRoute>} />
             <Route path="/applications/:id" element={<ProtectedRoute><ApplicationDetails /></ProtectedRoute>} />
+            <Route path="/traces" element={<ProtectedRoute><Traces /></ProtectedRoute>} />
             <Route path="/logs" element={<ProtectedRoute><Logs /></ProtectedRoute>} />
             <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

@@ -1,8 +1,8 @@
 const express = require('express');
 const router = express.Router();
-const Product = require('../../models/product');
 const { isAuth, isAdmin } = require('../../middleware/authMiddleware');
 const logger = require('../../middleware/logger');
+const productClient = require('../../utils/serviceClients/productClient');
 
 // GET /api/products
 router.get('/', async (req, res, next) => {
@@ -14,14 +14,15 @@ router.get('/', async (req, res, next) => {
         if (category) query.category = category;
         if (search) query.name = { $regex: search, $options: 'i' };
 
-        const products = await Product.find(query).sort({ createdAt: -1 });
-        logger.info(`[API] Fetched ${products.length} products`);
+        const response = await productClient.getProducts({ category, search }, req.requestId);
+        const products = response.data || [];
+        logger.info(`[API] Fetched ${products.length} products via Product Service`);
 
         res.status(200).json({
             success: true,
             count: products.length,
             data: products,
-            service: 'product-service'
+            service: 'product-service-gateway'
         });
     } catch (err) {
         next(err);
@@ -31,18 +32,19 @@ router.get('/', async (req, res, next) => {
 // GET /api/products/:id
 router.get('/:id', async (req, res, next) => {
     try {
-        const product = await Product.findById(req.params.id);
+        const response = await productClient.getProductById(req.params.id, req.requestId);
+        const product = response.data;
         if (!product) {
             return res.status(404).json({
                 success: false,
                 error: 'Product not found',
-                service: 'product-service'
+                service: 'product-service-gateway'
             });
         }
         res.status(200).json({
             success: true,
             data: product,
-            service: 'product-service'
+            service: 'product-service-gateway'
         });
     } catch (err) {
         next(err);
@@ -52,13 +54,13 @@ router.get('/:id', async (req, res, next) => {
 // POST /api/products (Admin)
 router.post('/', isAuth, isAdmin, async (req, res, next) => {
     try {
-        const product = new Product(req.body);
-        await product.save();
-        logger.info(`[API] Product created: ${product.name}`);
+        const response = await productClient.createProduct(req.body, req.requestId);
+        const product = response.data;
+        logger.info(`[API] Product created via Gateway: ${product.name}`);
         res.status(201).json({
             success: true,
             data: product,
-            service: 'product-service'
+            service: 'product-service-gateway'
         });
     } catch (err) {
         next(err);
@@ -68,19 +70,20 @@ router.post('/', isAuth, isAdmin, async (req, res, next) => {
 // PUT /api/products/:id (Admin)
 router.put('/:id', isAuth, isAdmin, async (req, res, next) => {
     try {
-        const product = await Product.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+        const response = await productClient.updateProduct(req.params.id, req.body, req.requestId);
+        const product = response.data;
         if (!product) {
             return res.status(404).json({
                 success: false,
                 error: 'Product not found',
-                service: 'product-service'
+                service: 'product-service-gateway'
             });
         }
-        logger.info(`[API] Product updated: ${product.name}`);
+        logger.info(`[API] Product updated via Gateway: ${product.name}`);
         res.status(200).json({
             success: true,
             data: product,
-            service: 'product-service'
+            service: 'product-service-gateway'
         });
     } catch (err) {
         next(err);
@@ -90,19 +93,12 @@ router.put('/:id', isAuth, isAdmin, async (req, res, next) => {
 // DELETE /api/products/:id (Admin)
 router.delete('/:id', isAuth, isAdmin, async (req, res, next) => {
     try {
-        const product = await Product.findByIdAndDelete(req.params.id);
-        if (!product) {
-            return res.status(404).json({
-                success: false,
-                error: 'Product not found',
-                service: 'product-service'
-            });
-        }
-        logger.info(`[API] Product deleted: ${req.params.id}`);
+        await productClient.deleteProduct(req.params.id, req.requestId);
+        logger.info(`[API] Product deleted via Gateway: ${req.params.id}`);
         res.status(200).json({
             success: true,
             message: 'Product deleted successfully',
-            service: 'product-service'
+            service: 'product-service-gateway'
         });
     } catch (err) {
         next(err);

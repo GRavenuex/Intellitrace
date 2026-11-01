@@ -1,17 +1,22 @@
-const Product = require('../models/product');
-const Order = require('../models/order');
 const User = require('../models/user');
 const logger = require('../middleware/logger');
 const fs = require('fs');
-const product = require('../models/product');
+const productClient = require('../utils/serviceClients/productClient');
+const orderClient = require('../utils/serviceClients/orderClient');
 
 // Admin Dashboard Overview
 exports.getDashboard = async (req , res , next)=>{
     try{
-        const totalProducts = await Product.countDocuments();
-        const totalOrders = await Order.countDocuments();
+        const productsRes = await productClient.getProducts({}, req.requestId);
+        const totalProducts = productsRes.data ? productsRes.data.length : 0;
+        
+        const totalOrdersRes = await orderClient.countOrders(req.requestId);
+        const totalOrders = totalOrdersRes.data || 0;
+        
         const totalUsers = await User.countDocuments();
-        const recentOrders = await Order.find().sort({createdAt:-1}).limit(5).populate('userId','email firstName lastName');
+        
+        const recentOrdersRes = await orderClient.getRecentOrders(5, req.requestId);
+        const recentOrders = recentOrdersRes.data || [];
 
         logger.info("Admin dashboard accessed", {
             requestId: req.requestId,
@@ -36,7 +41,9 @@ exports.getDashboard = async (req , res , next)=>{
 // Admin Product Inventory View
 exports.getProducts = async(req, res , next)=>{
     try{
-        const products  = await Product.find().sort({createdAt:-1});
+        const response = await productClient.getProducts({}, req.requestId);
+        const products = response.data || [];
+        
         res.render('admin/products' ,{
             pageTitle: 'Manage products-Intellishop Admin',
             currentPage:'admin-products',products,
@@ -76,7 +83,7 @@ exports.postAddProduct = async (req, res, next) => {
             image = 'https://images.unsplash.com/photo-1526738549149-8e07eca6c147?w=800&auto=format&fit=crop&q=80';
         }
 
-        const product = new Product({
+        const productData = {
             name,
             price: parseFloat(price),
             category,
@@ -85,9 +92,11 @@ exports.postAddProduct = async (req, res, next) => {
             description,
             image,
             rating: 4.5
-        });
+        };
 
-        await product.save();
+        const response = await productClient.createProduct(productData, req.requestId);
+        const product = response.data;
+        
         logger.info("Product created", { 
             requestId: req.requestId,
             userId: req.session?.user?.id,
@@ -107,7 +116,8 @@ exports.postAddProduct = async (req, res, next) => {
 exports.getEditProduct = async (req, res, next) => {
     try {
         const productId = req.params.id;
-        const product = await Product.findById(productId);
+        const response = await productClient.getProductById(productId, req.requestId);
+        const product = response.data;
 
         if (!product) {
             return res.redirect('/admin/products');
@@ -131,26 +141,24 @@ exports.getEditProduct = async (req, res, next) => {
 exports.postEditProduct = async (req, res, next) => {
     try {
         const { id, name, price, category, brand, stock, description } = req.body;
-        const product = await Product.findById(id);
-
-        if (!product) {
-            return res.redirect('/admin/products');
-        }
-
-        product.name = name;
-        product.price = parseFloat(price);
-        product.category = category;
-        product.brand = brand;
-        product.stock = parseInt(stock);
-        product.description = description;
+        
+        const updateData = {
+            name,
+            price: parseFloat(price),
+            category,
+            brand,
+            stock: parseInt(stock),
+            description
+        };
 
         if (req.file) {
-            product.image = '/' + req.file.path.replace(/\\/g, '/');
+            updateData.image = '/' + req.file.path.replace(/\\/g, '/');
         } else if (req.body.imageUrl) {
-            product.image = req.body.imageUrl;
+            updateData.image = req.body.imageUrl;
         }
 
-        await product.save();
+        await productClient.updateProduct(id, updateData, req.requestId);
+        
         logger.info("Product updated", { 
             requestId: req.requestId,
             userId: req.session?.user?.id,
@@ -167,7 +175,8 @@ exports.postEditProduct = async (req, res, next) => {
 exports.postDeleteProduct = async (req, res, next) => {
     try {
         const productId = req.params.id || req.body.id;
-        await Product.findByIdAndDelete(productId);
+        await productClient.deleteProduct(productId, req.requestId);
+        
         logger.info("Product deleted", { 
             requestId: req.requestId,
             userId: req.session?.user?.id,
@@ -183,7 +192,8 @@ exports.postDeleteProduct = async (req, res, next) => {
 // Admin Orders List
 exports.getOrders = async (req, res, next) => {
     try {
-        const orders = await Order.find().sort({ createdAt: -1 }).populate('userId', 'email firstName lastName');
+        const response = await orderClient.getOrders(null, req.requestId);
+        const orders = response.data || [];
 
         res.render('admin/orders', {
             pageTitle: 'Manage Orders - IntelliShop Admin',
@@ -202,13 +212,9 @@ exports.getOrders = async (req, res, next) => {
 exports.postUpdateOrderStatus = async (req, res, next) => {
     try {
         const { orderId, orderStatus } = req.body;
-        const order = await Order.findById(orderId);
-
-        if (order) {
-            order.orderStatus = orderStatus;
-            await order.save();
-            logger.info("Order status updated by admin", { orderId, orderStatus });
-        }
+        
+        await orderClient.updateOrder(orderId, { orderStatus }, req.requestId);
+        logger.info("Order status updated by admin", { orderId, orderStatus });
 
         res.redirect('/admin/orders');
     } catch (err) {

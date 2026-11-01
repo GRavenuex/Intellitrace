@@ -91,6 +91,43 @@ const healthStatus = new promClient.Gauge({
 });
 register.registerMetric(healthStatus);
 
+// Failure Injection Metrics
+const failureInjectionsTotal = new promClient.Counter({
+    name: 'intellitrace_failure_injections_total',
+    help: 'Total number of failure injection events recorded',
+    labelNames: ['service', 'failure_type']
+});
+register.registerMetric(failureInjectionsTotal);
+
+const failureInjectionsActive = new promClient.Gauge({
+    name: 'intellitrace_failure_injections_active',
+    help: 'Current active failure injection rules',
+    labelNames: ['service']
+});
+register.registerMetric(failureInjectionsActive);
+
+const injectedFailuresTotal = new promClient.Counter({
+    name: 'intellitrace_injected_failures_total',
+    help: 'Total number of injected failure executions triggered',
+    labelNames: ['service', 'failure_type', 'operation']
+});
+register.registerMetric(injectedFailuresTotal);
+
+const injectedLatencySeconds = new promClient.Histogram({
+    name: 'intellitrace_injected_latency_seconds',
+    help: 'Injected artificial latency in seconds',
+    labelNames: ['service', 'operation'],
+    buckets: [0.5, 1, 2, 3, 5, 8, 10]
+});
+register.registerMetric(injectedLatencySeconds);
+
+const failureInjectionErrorsTotal = new promClient.Counter({
+    name: 'intellitrace_failure_injection_errors_total',
+    help: 'Total errors encountered during failure injection',
+    labelNames: ['service']
+});
+register.registerMetric(failureInjectionErrorsTotal);
+
 module.exports = {
     register,
     httpRequestsTotal,
@@ -104,5 +141,10 @@ module.exports = {
     cartOperationsTotal,
     authSuccessTotal,
     authFailureTotal,
-    healthStatus
+    healthStatus,
+    failureInjectionsTotal,
+    failureInjectionsActive,
+    injectedFailuresTotal,
+    injectedLatencySeconds,
+    failureInjectionErrorsTotal
 };

@@ -25,7 +25,9 @@ const logSchema = new mongoose.Schema({
     route: String,
     statusCode: Number,
     responseTime: Number,
-    requestId: String
-}, { timestamps: true });
+    requestId: String,
+    traceId: String,
+    spanId: String
+}, { timestamps: true, strict: false });
 
 module.exports = mongoose.model('Log', logSchema);
