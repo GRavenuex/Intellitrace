@@ -327,7 +327,7 @@ exports.getServices = async (req, res, next) => {
 };
 
 // GET /api/traces/:traceId - get full trace waterfall
-exports.getTraceById = async (req, res, next) => {
+const getTraceById = async (req, res, next) => {
     try {
         const { traceId } = req.params;
         const jaegerRes = await fetchJaeger(`/api/traces/${encodeURIComponent(traceId)}`);
@@ -344,4 +344,13 @@ exports.getTraceById = async (req, res, next) => {
             message: 'Failed to retrieve trace from backend: ' + err.message
         });
     }
+};
+
+module.exports = {
+    getTraces: exports.getTraces,
+    getServices: exports.getServices,
+    getTraceById,
+    fetchJaeger,
+    summarizeTrace,
+    formatTraceDetail
 };

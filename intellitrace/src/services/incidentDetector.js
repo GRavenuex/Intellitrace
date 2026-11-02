@@ -11,6 +11,7 @@ const MetricSnapshot = require('../models/MetricSnapshot');
 const Application = require('../models/Application');
 const FailureInjection = require('../models/FailureInjection');
 const { getRules, getRuleById } = require('../config/incidentRules');
+const { correlateIncidentEvidence } = require('./evidenceCorrelator');
 
 const PROMETHEUS_URL = process.env.PROMETHEUS_URL || 'http://prometheus:9090';
 const JAEGER_URL = process.env.JAEGER_URL || 'http://jaeger:16686';
@@ -145,6 +146,10 @@ async function reportDetectedCondition({
         }
 
         await existingIncident.save();
+        // Asynchronously update correlated evidence
+        correlateIncidentEvidence(existingIncident, { forceRefresh: true }).catch(err => {
+            console.warn(`[IncidentEngine] Auto-correlation on update warning: ${err.message}`);
+        });
         return existingIncident;
     } else {
         // Create brand new incident
@@ -188,6 +193,12 @@ async function reportDetectedCondition({
 
         await newIncident.save();
         console.log(`[IncidentEngine] Created new incident: ${incidentId} - ${title} [${severity.toUpperCase()}]`);
+
+        // Asynchronously compute correlated evidence
+        correlateIncidentEvidence(newIncident, { forceRefresh: true }).catch(err => {
+            console.warn(`[IncidentEngine] Auto-correlation on create warning: ${err.message}`);
+        });
+
         return newIncident;
     }
 }
@@ -669,17 +680,22 @@ async function evaluateTelemetry() {
                 const reqChecks = rule?.recoveryCondition?.requiredConsecutiveHealthyChecks || 2;
 
                 if (inc.consecutiveHealthyCount >= reqChecks) {
-                    // Problem has ceased and recovery is confirmed
-                    inc.status = 'resolved';
-                    inc.resolvedAt = now;
-                    inc.timeline.push({
-                        timestamp: now,
-                        type: 'auto_resolved',
-                        message: `Condition cleared. Incident automatically resolved after ${inc.consecutiveHealthyCount} consecutive healthy evaluation cycles.`,
-                        actor: 'system'
-                    });
-                    await inc.save();
-                    console.log(`[IncidentEngine] Auto-resolved incident: ${inc.incidentId} (${inc.title})`);
+                    // Service recovery detected, but NEVER auto-resolve status!
+                    // Service recovery and incident resolution must remain separate.
+                    if (!inc.serviceRecovered) {
+                        inc.serviceRecovered = true;
+                        inc.recoveredAt = now;
+                        inc.timeline.push({
+                            timestamp: now,
+                            type: 'status_change',
+                            message: `Telemetry recovered to healthy baseline after ${inc.consecutiveHealthyCount} consecutive healthy evaluation cycles. Incident remains ${inc.status.toUpperCase()} for developer investigation and manual resolution.`,
+                            actor: 'system'
+                        });
+                        await inc.save();
+                        console.log(`[IncidentEngine] Telemetry recovered for ${inc.incidentId} (${inc.title}) - Status kept as ${inc.status}`);
+                    } else {
+                        await inc.save();
+                    }
                 } else {
                     await inc.save();
                 }

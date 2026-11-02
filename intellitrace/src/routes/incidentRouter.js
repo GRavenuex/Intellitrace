@@ -15,7 +15,15 @@ router.patch('/rules/:ruleId', authMiddleware, incidentController.updateRule);
 router.get('/', authMiddleware, incidentController.getIncidents);
 router.get('/:id', authMiddleware, incidentController.getIncidentById);
 router.patch('/:id/status', authMiddleware, incidentController.updateIncidentStatus);
+
+// Phase 13 Evidence Correlation & Investigation endpoints
+router.get('/:id/investigation', authMiddleware, incidentController.getIncidentInvestigation);
 router.get('/:id/evidence', authMiddleware, incidentController.getIncidentEvidence);
+router.get('/:id/logs', authMiddleware, incidentController.getIncidentLogs);
+router.get('/:id/traces', authMiddleware, incidentController.getIncidentTraces);
+router.get('/:id/metrics', authMiddleware, incidentController.getIncidentMetrics);
+router.get('/:id/dependencies', authMiddleware, incidentController.getIncidentDependencies);
+router.post('/:id/correlate', authMiddleware, incidentController.correlateIncidentNow);
 
 module.exports = router;
 

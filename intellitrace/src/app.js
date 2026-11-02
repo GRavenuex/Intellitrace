@@ -40,6 +40,7 @@ app.use('/api/auth', authRouter);
 app.use('/api/applications', applicationRouter);
 app.use('/api/traces', traceRouter);
 app.use('/api/incidents', incidentRouter);
+app.use('/api/v1/incidents', incidentRouter);
 app.use('/api/v1/failure-injections', failureInjectionRouter);
 app.use('/api/failure-injections', failureInjectionRouter);
 app.use('/api/v1', telemetryRouter);

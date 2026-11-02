@@ -125,6 +125,18 @@ const incidentSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.Mixed,
         default: null
     },
+    serviceRecovered: {
+        type: Boolean,
+        default: false
+    },
+    recoveredAt: {
+        type: Date,
+        default: null
+    },
+    investigationSummary: {
+        type: mongoose.Schema.Types.Mixed,
+        default: null
+    },
     timeline: [
         {
             timestamp: {

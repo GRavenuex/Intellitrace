@@ -1,5 +1,6 @@
 const Application = require('../models/Application');
 const Log = require('../models/Log');
+const { sanitizeObject } = require('../utils/sanitizer');
 
 exports.heartbeat = async (req, res, next) => {
     try {
@@ -44,24 +45,17 @@ exports.heartbeat = async (req, res, next) => {
 exports.ingestLogs = async (req, res, next) => {
     try {
         const { application, environment, logs } = req.body;
-        let logsToInsert = [];
+        let rawList = logs && Array.isArray(logs) ? logs : [req.body];
         
-        if (logs && Array.isArray(logs)) {
-            logsToInsert = logs.map(l => ({
+        const logsToInsert = rawList.map(raw => {
+            const l = sanitizeObject(raw);
+            return {
                 ...l,
                 service: l.service || application,
                 environment: l.environment || environment || 'development',
                 timestamp: l.timestamp ? new Date(l.timestamp) : new Date()
-            }));
-        } else {
-            const l = req.body;
-            logsToInsert = [{
-                ...l,
-                service: l.service || application,
-                environment: l.environment || environment || 'development',
-                timestamp: l.timestamp ? new Date(l.timestamp) : new Date()
-            }];
-        }
+            };
+        });
         
         if (logsToInsert.length > 0) {
             await Log.insertMany(logsToInsert);
@@ -115,7 +109,7 @@ exports.getLogs = async (req, res, next) => {
         res.json({ 
             success: true, 
             data: {
-                items: logs,
+                items: logs.map(l => sanitizeObject(l.toObject ? l.toObject() : l)),
                 page: pageNum,
                 limit: limitNum,
                 total,
