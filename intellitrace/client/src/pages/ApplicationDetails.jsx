@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { formatDistanceToNow, format } from 'date-fns';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Server, Activity, AlertTriangle, Clock, RefreshCcw, LogOut } from 'lucide-react';
+import { Server, Activity, AlertTriangle, Clock, RefreshCcw, LogOut, Play, Square, FlaskConical, Zap, Database } from 'lucide-react';
 import api from '../api';
 
 export default function ApplicationDetails() {
@@ -12,6 +12,17 @@ export default function ApplicationDetails() {
     const [error, setError] = useState(false);
     const [range, setRange] = useState('15m');
     const [lastUpdated, setLastUpdated] = useState(new Date());
+    const [activeInjections, setActiveInjections] = useState([]);
+    const [simulating, setSimulating] = useState(false);
+
+    const fetchActiveInjections = async () => {
+        try {
+            const res = await api.get('/v1/failure-injections/active');
+            if (res.data?.success) {
+                setActiveInjections(res.data.data || []);
+            }
+        } catch (_) {}
+    };
 
     const fetchSummary = async () => {
         try {
@@ -34,9 +45,53 @@ export default function ApplicationDetails() {
     useEffect(() => {
         setLoading(true);
         fetchSummary();
-        const interval = setInterval(fetchSummary, 15000);
+        fetchActiveInjections();
+        const interval = setInterval(() => {
+            fetchSummary();
+            fetchActiveInjections();
+        }, 15000);
         return () => clearInterval(interval);
     }, [id, range]);
+
+    const handleActivateSimulation = async (fType, delayMs = 5000) => {
+        if (!summary) return;
+        setSimulating(true);
+        try {
+            const raw = (summary.application || '').toLowerCase();
+            const targetService = raw.includes('product') ? 'product-service' :
+                                  raw.includes('payment') ? 'payment-service' :
+                                  raw.includes('order') ? 'order-service' :
+                                  raw.includes('cart') ? 'cart-service' : 'intellishop-gateway';
+
+            await api.post('/v1/failure-injections', {
+                targetService,
+                failureType: fType,
+                delayMs: fType === 'latency' ? delayMs : 0,
+                durationSeconds: 60,
+                description: `Simulated ${fType.toUpperCase()} on ${targetService}`
+            });
+
+            await fetchSummary();
+            await fetchActiveInjections();
+        } catch (err) {
+            console.error('Failed to activate simulation:', err);
+        } finally {
+            setSimulating(false);
+        }
+    };
+
+    const handleStopSimulation = async (ruleId) => {
+        setSimulating(true);
+        try {
+            await api.patch(`/v1/failure-injections/${ruleId}/stop`);
+            await fetchSummary();
+            await fetchActiveInjections();
+        } catch (err) {
+            console.error('Failed to stop simulation:', err);
+        } finally {
+            setSimulating(false);
+        }
+    };
 
     if (loading && !summary) {
         return (
@@ -84,6 +139,98 @@ export default function ApplicationDetails() {
     }
 
     const { metrics, series, recentLogs, recentErrors, hasData, baseUrl, environment } = summary;
+
+    const bareName = (summary.application || '').replace('intellishop-', '').toLowerCase();
+
+    let serviceScenarios = [];
+    if (bareName.includes('product')) {
+        serviceScenarios = [
+            {
+                type: 'http_500',
+                name: 'Simulate Product HTTP 500',
+                description: 'Forces Product Service to return HTTP 500 internal server error on product endpoints.',
+                icon: AlertTriangle
+            },
+            {
+                type: 'latency',
+                name: 'Simulate High Latency (5s)',
+                description: 'Injects 5000ms delay into product requests while preserving catalog delivery.',
+                icon: Clock,
+                delayMs: 5000
+            },
+            {
+                type: 'database_timeout',
+                name: 'Simulate Database Query Timeout',
+                description: 'Forces product catalog operations to simulate MongoTimeoutError without shutting down DB.',
+                icon: Database
+            },
+            {
+                type: 'traffic_spike',
+                name: 'Simulate Traffic Spike (50 req)',
+                description: 'Generates a burst of 50 concurrent requests against Product Service to test overload.',
+                icon: Zap
+            }
+        ];
+    } else if (bareName.includes('payment')) {
+        serviceScenarios = [
+            {
+                type: 'http_500',
+                name: 'Simulate Payment HTTP 500',
+                description: 'Forces Payment Service to return HTTP 500 error during payment processing.',
+                icon: AlertTriangle
+            },
+            {
+                type: 'latency',
+                name: 'Simulate Payment Latency (5s)',
+                description: 'Adds 5000ms delay to payment processing transactions.',
+                icon: Clock,
+                delayMs: 5000
+            },
+            {
+                type: 'cascading_failure',
+                name: 'Simulate Cascading Failure',
+                description: 'Originates in Payment Service and propagates downstream to Order Service.',
+                icon: Zap
+            }
+        ];
+    } else if (bareName.includes('order')) {
+        serviceScenarios = [
+            {
+                type: 'service_communication_failure',
+                name: 'Simulate Downstream Comm Failure',
+                description: 'Order Service encounters downstream connection failure (ECONNREFUSED) when calling Payment.',
+                icon: AlertTriangle
+            },
+            {
+                type: 'database_timeout',
+                name: 'Simulate Database Query Timeout',
+                description: 'Simulates query timeout exception during order creation.',
+                icon: Database
+            },
+            {
+                type: 'traffic_spike',
+                name: 'Simulate Traffic Spike (50 req)',
+                description: 'Sends a burst of concurrent requests against Order Service.',
+                icon: Zap
+            }
+        ];
+    } else if (bareName.includes('cart')) {
+        serviceScenarios = [
+            {
+                type: 'http_500',
+                name: 'Simulate Cart HTTP 500',
+                description: 'Returns HTTP 500 internal server error during cart operations.',
+                icon: AlertTriangle
+            },
+            {
+                type: 'latency',
+                name: 'Simulate Cart Latency (5s)',
+                description: 'Injects 5000ms artificial delay into cart addition and retrieval.',
+                icon: Clock,
+                delayMs: 5000
+            }
+        ];
+    }
 
     const formatXAxis = (tickItem) => {
         return format(new Date(tickItem), 'HH:mm');
@@ -318,18 +465,107 @@ export default function ApplicationDetails() {
                         </div>
                     </div>
                 </div>
-                
+
                 <div className="bg-white rounded shadow border border-gray-200">
                     <div className="bg-gray-50 px-6 py-4 border-b border-gray-200">
-                        <h3 className="text-sm font-bold text-gray-800 uppercase tracking-wider">Active Incidents</h3>
+                        <h3 className="text-sm font-bold text-gray-800 uppercase tracking-wider">Telemetry Diagnostics</h3>
                     </div>
-                    <div className="p-6 flex flex-col items-center justify-center h-48 text-gray-500">
-                        <Activity className="w-12 h-12 mb-3 text-gray-300" />
-                        <p className="font-medium text-gray-700">No active incidents</p>
-                        <p className="text-xs mt-1">Incident detection is not currently active.</p>
+                    <div className="p-6 space-y-4 text-xs text-gray-600">
+                        <div className="flex justify-between items-center py-2 border-b border-gray-100">
+                            <span className="font-semibold text-gray-700">Service Category</span>
+                            <span className="font-mono bg-gray-100 px-2 py-0.5 rounded text-gray-800 uppercase">{bareName || 'Microservice'}</span>
+                        </div>
+                        <div className="flex justify-between items-center py-2 border-b border-gray-100">
+                            <span className="font-semibold text-gray-700">Health State</span>
+                            <span className="font-semibold text-emerald-600">{displayStatus}</span>
+                        </div>
+                        <div className="flex justify-between items-center py-2 border-b border-gray-100">
+                            <span className="font-semibold text-gray-700">Active Failures</span>
+                            <span className="font-semibold text-gray-900">{activeInjections.length} rule(s)</span>
+                        </div>
+                        <div className="flex justify-between items-center py-2">
+                            <span className="font-semibold text-gray-700">Deep Diagnostics</span>
+                            <Link to={`/traces?service=${bareName}`} className="text-blue-600 hover:underline font-semibold flex items-center gap-1">
+                                Service Traces &rarr;
+                            </Link>
+                        </div>
                     </div>
                 </div>
             </div>
+
+            {/* Failure Simulation Scenarios Panel */}
+            {serviceScenarios.length > 0 && (
+                <div className="bg-white rounded-xl shadow border border-gray-200 overflow-hidden">
+                    <div className="bg-slate-900 text-white px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div className="flex items-center gap-3">
+                            <div className="p-2 bg-indigo-500/20 rounded-lg text-indigo-400">
+                                <FlaskConical className="w-5 h-5" />
+                            </div>
+                            <div>
+                                <h3 className="text-sm font-bold tracking-wide">Failure Simulation Scenarios ({summary.application})</h3>
+                                <p className="text-xs text-slate-300">Inject controlled fault scenarios to test observability, traces, and incident detection.</p>
+                            </div>
+                        </div>
+                        <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-indigo-950 text-indigo-300 border border-indigo-800 self-start sm:self-auto">
+                            {serviceScenarios.length} Scenarios Available
+                        </span>
+                    </div>
+
+                    <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {serviceScenarios.map(s => {
+                            const active = activeInjections.find(i => 
+                                (i.status === 'ACTIVE' || i.status === 'TRIGGERED') && 
+                                i.failureType.toLowerCase() === s.type.toLowerCase()
+                            );
+                            const IconComponent = s.icon;
+
+                            return (
+                                <div key={s.type} className="p-4 rounded-xl border border-gray-200 bg-gray-50/60 flex flex-col justify-between hover:border-gray-300 transition">
+                                    <div>
+                                        <div className="flex items-start justify-between gap-2 mb-1.5">
+                                            <div className="flex items-center gap-2 font-bold text-sm text-gray-900">
+                                                <IconComponent className="w-4 h-4 text-blue-600" />
+                                                {s.name}
+                                            </div>
+                                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                                                active ? (active.status === 'TRIGGERED' ? 'bg-rose-100 text-rose-800 border border-rose-300' : 'bg-amber-100 text-amber-800 border border-amber-300 animate-pulse') : 'bg-gray-100 text-gray-600 border border-gray-200'
+                                            }`}>
+                                                {active ? active.status : 'INACTIVE'}
+                                            </span>
+                                        </div>
+                                        <p className="text-xs text-gray-500 leading-relaxed mb-4">
+                                            {s.description}
+                                        </p>
+                                    </div>
+
+                                    <div className="pt-3 border-t border-gray-200/80 flex items-center justify-between gap-2">
+                                        <span className="text-[11px] font-mono text-gray-400">
+                                            {active ? `Triggered: ${active.triggerCount || 0}x` : 'Duration: 60s'}
+                                        </span>
+                                        {active ? (
+                                            <button
+                                                onClick={() => handleStopSimulation(active._id)}
+                                                disabled={simulating}
+                                                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-rose-600 text-white hover:bg-rose-700 transition flex items-center gap-1.5 shadow-sm"
+                                            >
+                                                <Square className="w-3 h-3 fill-current" /> Stop Simulation
+                                            </button>
+                                        ) : (
+                                            <button
+                                                onClick={() => handleActivateSimulation(s.type, s.delayMs)}
+                                                disabled={simulating}
+                                                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-700 transition flex items-center gap-1.5 shadow-sm"
+                                            >
+                                                <Play className="w-3 h-3 fill-current" /> Activate Simulation
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            )}
 
             {/* Logs & Errors */}
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">

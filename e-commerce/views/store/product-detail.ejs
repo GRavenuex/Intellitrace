@@ -118,6 +118,11 @@ git branch -M main
         </section>
     <% } %>
 
+    <!-- Developer Controls / Failure Simulation Section -->
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-16">
+        <%- include('../partials/developerControls.ejs', { pageContext: 'product', targetService: 'product-service' }) %>
+    </div>
+
 </main>
 
 </body>

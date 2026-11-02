@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { Activity, Server, FileText, Network, Settings, LogOut } from 'lucide-react';
+import { Activity, Server, FileText, Network, AlertOctagon, Settings, LogOut } from 'lucide-react';
 
 export default function Sidebar() {
     const navigate = useNavigate();
@@ -25,6 +25,9 @@ export default function Sidebar() {
             <nav className="flex-1 px-4 mt-6">
                 <NavLink to="/dashboard" className={linkClass}>
                     <Activity className="w-5 h-5 mr-3" /> Dashboard
+                </NavLink>
+                <NavLink to="/incidents" className={linkClass}>
+                    <AlertOctagon className="w-5 h-5 mr-3" /> Incidents
                 </NavLink>
                 <NavLink to="/applications" className={linkClass}>
                     <Server className="w-5 h-5 mr-3" /> Applications
