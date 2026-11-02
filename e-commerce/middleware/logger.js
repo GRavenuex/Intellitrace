@@ -17,17 +17,27 @@ const SENSITIVE_FIELDS = [
     'payment credentials'
 ];
 
+const sanitizeString = (str) => {
+    if (!str || typeof str !== 'string') return str;
+    return str
+        .replace(/(?:password|passwordHash|secret|token|apiKey|api_key|auth|authorization)\s*[:=]\s*["']?([^"',\s]+)["']?/gi, (m, val) => m.replace(val, '[REDACTED]'))
+        .replace(/Bearer\s+[A-Za-z0-9\-._~+/]+=*/gi, 'Bearer [REDACTED_TOKEN]')
+        .replace(/eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9._-]{10,}\.[A-Za-z0-9._-]{10,}/g, '[REDACTED_JWT]');
+};
+
 const sanitize = (obj) => {
-    if (!obj || typeof obj !== 'object') return obj;
+    if (!obj || typeof obj !== 'object') return typeof obj === 'string' ? sanitizeString(obj) : obj;
     const sanitized = {};
     for (const [key, value] of Object.entries(obj)) {
         if (SENSITIVE_FIELDS.includes(key) || key.toLowerCase().includes('password') || key.toLowerCase().includes('secret')) {
             sanitized[key] = '[REDACTED]';
+        } else if (typeof value === 'string') {
+            sanitized[key] = sanitizeString(value);
         } else if (typeof value === 'object' && value !== null) {
             if (Array.isArray(value)) {
-                 sanitized[key] = value.map(item => typeof item === 'object' ? sanitize(item) : item);
+                sanitized[key] = value.map(item => typeof item === 'object' ? sanitize(item) : sanitizeString(item));
             } else {
-                 sanitized[key] = sanitize(value);
+                sanitized[key] = sanitize(value);
             }
         } else {
             sanitized[key] = value;
@@ -57,14 +67,40 @@ const formatLog = (level, message, meta = {}) => {
         }
     } catch (_) {}
 
+    let logMessage = message;
+    if (message instanceof Error) {
+        if (!finalMeta.error) finalMeta.error = message;
+        logMessage = message.message;
+    }
+
+    // Explicitly preserve non-enumerable Error properties
+    if (finalMeta.error) {
+        const errObj = finalMeta.error;
+        finalMeta.error = {
+            name: errObj.name || (errObj.constructor ? errObj.constructor.name : 'Error'),
+            message: errObj.message || (typeof errObj === 'string' ? errObj : ''),
+            stack: errObj.stack || finalMeta.stack || null
+        };
+        if (!finalMeta.stack && finalMeta.error.stack) {
+            finalMeta.stack = finalMeta.error.stack;
+        }
+    } else if (finalMeta.stack) {
+        finalMeta.error = {
+            name: finalMeta.errorName || 'Error',
+            message: typeof logMessage === 'string' ? logMessage : 'Error occurred',
+            stack: finalMeta.stack
+        };
+    }
+
     const sanitizedMeta = sanitize(finalMeta);
+    const serviceName = process.env.OTEL_SERVICE_NAME || process.env.SERVICE_NAME || 'intellishop-gateway';
 
     const logEntry = {
         timestamp,
         level,
-        service: "intellishop",
-        environment: process.env.NODE_ENV || "development",
-        message,
+        service: serviceName,
+        environment: process.env.NODE_ENV || 'development',
+        message: sanitizeString(logMessage),
         ...sanitizedMeta
     };
 

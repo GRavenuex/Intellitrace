@@ -2,6 +2,7 @@ const http = require('http');
 
 const INTELLITRACE_URL = process.env.INTELLITRACE_URL || 'http://localhost:4000/api/v1';
 const API_KEY = process.env.INTELLITRACE_API_KEY || 'default_telemetry_key';
+const APP_NAME = process.env.OTEL_SERVICE_NAME || process.env.SERVICE_NAME || 'intellishop-gateway';
 
 const getHeaders = (dataLength) => ({
     'Content-Type': 'application/json',
@@ -12,7 +13,7 @@ const getHeaders = (dataLength) => ({
 // 1. Heartbeat
 setInterval(() => {
     const data = JSON.stringify({
-        application: 'intellishop',
+        application: APP_NAME,
         environment: process.env.NODE_ENV || 'development',
         status: 'healthy',
         baseUrl: process.env.SERVICE_BASE_URL || 'http://localhost:3000'
@@ -43,7 +44,7 @@ setInterval(() => {
     logBuffer = [];
 
     const data = JSON.stringify({
-        application: 'intellishop',
+        application: APP_NAME,
         environment: process.env.NODE_ENV || 'development',
         logs: logsToSend
     });

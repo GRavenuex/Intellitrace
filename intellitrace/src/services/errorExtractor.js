@@ -6,7 +6,7 @@
 const { sanitizeString, sanitizeObject } = require('../utils/sanitizer');
 
 /**
- * Parses raw stack trace to identify application source file and function name.
+ * Parses raw stack trace to identify application source file, function name, and line/col.
  * Never invents file names or line numbers.
  */
 function parseStackTrace(rawStack) {
@@ -15,6 +15,7 @@ function parseStackTrace(rawStack) {
             sourceFile: 'Source file information unavailable.',
             sourceFunction: 'Function information unavailable.',
             lineNumber: null,
+            columnNumber: null,
             cleanStack: null
         };
     }
@@ -25,23 +26,26 @@ function parseStackTrace(rawStack) {
     let sourceFile = 'Source file information unavailable.';
     let sourceFunction = 'Function information unavailable.';
     let lineNumber = null;
+    let columnNumber = null;
 
-    // Regex to match typical Node/V8 stack frame:
-    // at functionName (path/to/file.js:42:15) OR at path/to/file.js:42:15
-    const stackRegex = /^\s*at\s+(?:([^\s(]+)\s+\((.+?):(\d+):(\d+)\)|(.+?):(\d+):(\d+))/;
+    // Regex for Node / V8 stack frames:
+    // 1) at (async )?functionName (path:line:col)
+    // 2) at path:line:col
+    const stackRegex = /^\s*at\s+(?:(?:async\s+)?([^\s(]+)\s+\((.+?):(\d+):(\d+)\)|(.+?):(\d+):(\d+))/;
 
-    for (let i = 1; i < lines.length; i++) {
+    for (let i = 0; i < lines.length; i++) {
         const line = lines[i].trim();
         const match = line.match(stackRegex);
         if (match) {
             const fn = match[1] || 'anonymous';
             const filePath = match[2] || match[5];
             const lineNum = parseInt(match[3] || match[6], 10);
+            const colNum = parseInt(match[4] || match[7], 10);
 
             // Filter out node internals and node_modules
             if (filePath && !filePath.includes('node:internal') && !filePath.includes('node_modules')) {
-                // Normalize Windows or POSIX path to readable relative path
                 let normalizedPath = filePath.replace(/\\/g, '/');
+
                 const projectRootIndex = normalizedPath.indexOf('/e-commerce/');
                 if (projectRootIndex !== -1) {
                     normalizedPath = normalizedPath.substring(projectRootIndex + 1);
@@ -49,12 +53,15 @@ function parseStackTrace(rawStack) {
                     const intellitraceIndex = normalizedPath.indexOf('/intellitrace/');
                     if (intellitraceIndex !== -1) {
                         normalizedPath = normalizedPath.substring(intellitraceIndex + 1);
+                    } else if (normalizedPath.startsWith('/app/')) {
+                        normalizedPath = normalizedPath.replace(/^\/app\//, '');
                     }
                 }
 
                 sourceFile = normalizedPath;
                 sourceFunction = fn;
                 lineNumber = isNaN(lineNum) ? null : lineNum;
+                columnNumber = isNaN(colNum) ? null : colNum;
                 break;
             }
         }
@@ -64,35 +71,148 @@ function parseStackTrace(rawStack) {
         sourceFile,
         sourceFunction,
         lineNumber,
+        columnNumber,
         cleanStack: sanitizedStack
     };
 }
 
 /**
- * Categorizes an error based on its type and message.
+ * Identifies database involvement: 'MongoDB', 'Not involved', or 'Unknown'.
  */
-function categorizeError(errorType, errorMessage) {
-    const combined = `${errorType || ''} ${errorMessage || ''}`.toLowerCase();
-    if (combined.includes('mongo') || combined.includes('timeout') && combined.includes('db') || combined.includes('query')) {
-        return 'database';
+function identifyDatabase(logOrSpan, errorType, errorMessage) {
+    if (logOrSpan && logOrSpan.database) {
+        const dbLower = String(logOrSpan.database).toLowerCase();
+        if (dbLower.includes('mongo')) return 'MongoDB';
+        if (dbLower.includes('not involved')) return 'Not involved';
+        if (dbLower.includes('unknown')) return 'Unknown';
     }
-    if (combined.includes('econnrefused') || combined.includes('service_communication') || combined.includes('upstream') || combined.includes('downstream')) {
-        return 'communication';
+
+    const combined = `${errorType || ''} ${errorMessage || ''} ${logOrSpan?.message || ''}`.toLowerCase();
+    if (combined.includes('mongo') || combined.includes('mongoose')) {
+        return 'MongoDB';
     }
-    if (combined.includes('delay') || combined.includes('slow') || combined.includes('latency')) {
-        return 'latency';
+    if (combined.includes('econnrefused') || combined.includes('networkerror') || combined.includes('service_communication')) {
+        return 'Not involved';
     }
-    if (combined.includes('concurrency') || combined.includes('spike') || combined.includes('overload') || combined.includes('capacity')) {
-        return 'capacity';
+    if (combined.includes('validation') || combined.includes('bad request')) {
+        return 'Not involved';
     }
-    if (combined.includes('cascade') || combined.includes('cascading')) {
-        return 'cascade';
+
+    return 'Not involved';
+}
+
+/**
+ * Categorizes an error into one of the 8 required technical categories:
+ * - database_connection_error
+ * - database_query_error
+ * - application_error
+ * - validation_error
+ * - dependency_error
+ * - timeout_error
+ * - network_error
+ * - internal_error
+ */
+function categorizeError(errorType, errorMessage, logOrSpan = {}) {
+    if (logOrSpan.category) {
+        const cat = String(logOrSpan.category).toLowerCase();
+        const validCategories = [
+            'database_connection_error',
+            'database_query_error',
+            'application_error',
+            'validation_error',
+            'dependency_error',
+            'timeout_error',
+            'network_error',
+            'internal_error'
+        ];
+        if (validCategories.includes(cat)) return cat;
     }
+
+    const combined = `${errorType || ''} ${errorMessage || ''} ${logOrSpan.message || ''}`.toLowerCase();
+
+    // Database connection errors
+    if (
+        combined.includes('mongoserverselectionerror') ||
+        combined.includes('mongonetworkerror') ||
+        (combined.includes('mongo') && (combined.includes('connect') || combined.includes('topology') || combined.includes('econnrefused')))
+    ) {
+        return 'database_connection_error';
+    }
+
+    // Database query errors
+    if (
+        combined.includes('mongotimeouterror') ||
+        combined.includes('mongoerror') ||
+        combined.includes('casterror') ||
+        combined.includes('duplicate key') ||
+        combined.includes('database_timeout') ||
+        (combined.includes('mongo') && combined.includes('operation'))
+    ) {
+        return 'database_query_error';
+    }
+
+    // Network / Service communication errors
+    if (
+        combined.includes('econnrefused') ||
+        combined.includes('enotfound') ||
+        combined.includes('econnreset') ||
+        combined.includes('networkerror') ||
+        combined.includes('service_communication_failure')
+    ) {
+        return 'network_error';
+    }
+
+    // Timeout errors
+    if (
+        combined.includes('timeouterror') ||
+        combined.includes('etimedout') ||
+        combined.includes('gateway timeout') ||
+        (combined.includes('timeout') && !combined.includes('mongo'))
+    ) {
+        return 'timeout_error';
+    }
+
+    // Validation errors
+    if (
+        combined.includes('validationerror') ||
+        combined.includes('bad request') ||
+        logOrSpan.statusCode === 400 ||
+        logOrSpan.status === 400
+    ) {
+        return 'validation_error';
+    }
+
+    // Dependency errors
+    if (
+        combined.includes('dependency_error') ||
+        combined.includes('badgateway') ||
+        combined.includes('service_unavailable') ||
+        logOrSpan.statusCode === 502 ||
+        logOrSpan.statusCode === 503 ||
+        logOrSpan.statusCode === 504 ||
+        (combined.includes('responded with 50') && !combined.includes('internal'))
+    ) {
+        return 'dependency_error';
+    }
+
+    // Application programming errors
+    if (
+        combined.includes('typeerror') ||
+        combined.includes('referenceerror') ||
+        combined.includes('syntaxerror') ||
+        combined.includes('rangeerror') ||
+        combined.includes('cannot read property') ||
+        combined.includes('is not a function')
+    ) {
+        return 'application_error';
+    }
+
+    // Internal server errors
     return 'internal_error';
 }
 
 /**
- * Extracts error details from a log document or failed span.
+ * Extracts comprehensive technical error details from a log document or failed span.
  */
 function extractErrorDetails(logOrSpan) {
     if (!logOrSpan) return null;
@@ -103,11 +223,18 @@ function extractErrorDetails(logOrSpan) {
     let route = logOrSpan.route || logOrSpan.targetRoute || logOrSpan.targetOperation || null;
     let method = logOrSpan.method || null;
     let statusCode = logOrSpan.statusCode || logOrSpan.status || null;
-    let service = logOrSpan.service || logOrSpan.serviceName || logOrSpan.sourceService || 'unknown-service';
+
+    // Distinguish Originating, Reporting, and Affected services
+    let service = logOrSpan.service || logOrSpan.serviceName || 'unknown-service';
+    let originatingService = logOrSpan.originatingService || service;
+    let reportingService = logOrSpan.reportingService || service;
+    let affectedServices = Array.isArray(logOrSpan.affectedServices)
+        ? logOrSpan.affectedServices
+        : [service, originatingService].filter((v, i, a) => v && a.indexOf(v) === i);
+
     let requestId = logOrSpan.requestId || null;
     let traceId = logOrSpan.traceId || null;
     let spanId = logOrSpan.spanId || null;
-    let database = logOrSpan.database || null;
     let timestamp = logOrSpan.timestamp || new Date();
 
     // Check if it's a log with error/stack fields
@@ -162,7 +289,9 @@ function extractErrorDetails(logOrSpan) {
         else if (errorMessage.includes('MongoTimeoutError')) errorType = 'MongoTimeoutError';
         else if (errorMessage.includes('ECONNREFUSED')) errorType = 'ECONNREFUSED';
         else if (errorMessage.includes('TypeError')) errorType = 'TypeError';
-        else if (errorMessage.includes('AxiosError')) errorType = 'AxiosError';
+        else if (errorMessage.includes('ReferenceError')) errorType = 'ReferenceError';
+        else if (errorMessage.includes('ValidationError')) errorType = 'ValidationError';
+        else if (errorMessage.includes('NetworkError')) errorType = 'NetworkError';
         else if (errorMessage.includes('500') || statusCode === 500) errorType = 'HTTP 500 InternalServerError';
         else if (errorMessage.includes('503') || statusCode === 503) errorType = 'HTTP 503 ServiceUnavailable';
         else errorType = 'ApplicationError';
@@ -175,9 +304,8 @@ function extractErrorDetails(logOrSpan) {
     const finalErrorMessage = errorMessage ? sanitizeString(errorMessage) : 'Exact error message not available. Review related logs and traces.';
     const finalErrorType = errorType ? sanitizeString(errorType) : 'Unspecified Application Error';
 
-    if (finalErrorMessage.toLowerCase().includes('mongo') || (logOrSpan.message && logOrSpan.message.toLowerCase().includes('mongo'))) {
-        database = database || 'mongodb';
-    }
+    const database = identifyDatabase(logOrSpan, finalErrorType, finalErrorMessage);
+    const category = categorizeError(finalErrorType, finalErrorMessage, logOrSpan);
 
     return {
         errorType: finalErrorType,
@@ -186,22 +314,26 @@ function extractErrorDetails(logOrSpan) {
         sourceFile: stackInfo.sourceFile,
         sourceFunction: stackInfo.sourceFunction,
         lineNumber: stackInfo.lineNumber,
+        columnNumber: stackInfo.columnNumber,
         route,
         method,
         statusCode: statusCode ? Number(statusCode) : null,
         service,
+        originatingService,
+        reportingService,
+        affectedServices,
         requestId,
         traceId,
         spanId,
         database,
-        category: categorizeError(finalErrorType, finalErrorMessage),
+        category,
         timestamp
     };
 }
 
 module.exports = {
     parseStackTrace,
+    identifyDatabase,
     categorizeError,
     extractErrorDetails
 };
-

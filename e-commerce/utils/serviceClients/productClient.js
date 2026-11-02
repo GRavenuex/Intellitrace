@@ -15,16 +15,43 @@ const getHeaders = (requestId) => {
     return headers;
 };
 
+async function handleDownstreamResponse(res, serviceName) {
+    if (res.ok) return await res.json();
+    let errorBody = {};
+    try { errorBody = await res.json(); } catch (_) {}
+    const originalMsg = errorBody.error || errorBody.message || `${serviceName} responded with status ${res.status}`;
+    const err = new Error(originalMsg);
+    err.statusCode = res.status;
+    err.name = errorBody.errorType || 'ProductServiceError';
+    err.originatingService = errorBody.service || serviceName;
+    err.reportingService = 'intellishop-gateway';
+    err.downstreamError = originalMsg;
+    throw err;
+}
+
 exports.getProducts = async (queryParams, requestId) => {
     try {
         const query = new URLSearchParams(queryParams).toString();
         const res = await fetch(`${PRODUCT_SERVICE_URL}/api/products?${query}`, {
             headers: getHeaders(requestId)
         });
-        if (!res.ok) throw new Error(`Product service responded with ${res.status}`);
-        return await res.json();
+        return await handleDownstreamResponse(res, 'product-service');
     } catch (err) {
-        logger.error("Failed to call product service getProducts", { requestId, error: err.message });
+        logger.error(`Failed to call product service getProducts: ${err.message}`, {
+            service: 'intellishop-gateway',
+            originatingService: err.originatingService || 'product-service',
+            reportingService: 'intellishop-gateway',
+            route: '/api/products',
+            method: 'GET',
+            statusCode: err.statusCode || 500,
+            requestId,
+            error: {
+                name: err.name || 'ProductClientError',
+                message: err.message,
+                stack: err.stack
+            },
+            stack: err.stack
+        });
         throw err;
     }
 };
@@ -34,10 +61,23 @@ exports.getFeaturedProducts = async (limit, requestId) => {
         const res = await fetch(`${PRODUCT_SERVICE_URL}/api/products/featured?limit=${limit || 8}`, {
             headers: getHeaders(requestId)
         });
-        if (!res.ok) throw new Error(`Product service responded with ${res.status}`);
-        return await res.json();
+        return await handleDownstreamResponse(res, 'product-service');
     } catch (err) {
-        logger.error("Failed to call product service getFeaturedProducts", { requestId, error: err.message });
+        logger.error(`Failed to call product service getFeaturedProducts: ${err.message}`, {
+            service: 'intellishop-gateway',
+            originatingService: err.originatingService || 'product-service',
+            reportingService: 'intellishop-gateway',
+            route: '/api/products/featured',
+            method: 'GET',
+            statusCode: err.statusCode || 500,
+            requestId,
+            error: {
+                name: err.name || 'ProductClientError',
+                message: err.message,
+                stack: err.stack
+            },
+            stack: err.stack
+        });
         throw err;
     }
 };
@@ -47,10 +87,24 @@ exports.getProductById = async (id, requestId) => {
         const res = await fetch(`${PRODUCT_SERVICE_URL}/api/products/${id}`, {
             headers: getHeaders(requestId)
         });
-        if (!res.ok) throw new Error(`Product service responded with ${res.status}`);
-        return await res.json();
+        return await handleDownstreamResponse(res, 'product-service');
     } catch (err) {
-        logger.error("Failed to call product service getProductById", { requestId, productId: id, error: err.message });
+        logger.error(`Failed to call product service getProductById: ${err.message}`, {
+            service: 'intellishop-gateway',
+            originatingService: err.originatingService || 'product-service',
+            reportingService: 'intellishop-gateway',
+            route: `/api/products/${id}`,
+            method: 'GET',
+            statusCode: err.statusCode || 500,
+            requestId,
+            productId: id,
+            error: {
+                name: err.name || 'ProductClientError',
+                message: err.message,
+                stack: err.stack
+            },
+            stack: err.stack
+        });
         throw err;
     }
 };

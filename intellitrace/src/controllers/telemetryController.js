@@ -42,6 +42,18 @@ exports.heartbeat = async (req, res, next) => {
     }
 };
 
+function normalizeServiceName(name) {
+    if (!name) return name;
+    const map = {
+        'intellishop-payment-service': 'payment-service',
+        'intellishop-order-service': 'order-service',
+        'intellishop-cart-service': 'cart-service',
+        'intellishop-product-service': 'product-service',
+        'intellishop': 'intellishop-gateway'
+    };
+    return map[name] || name;
+}
+
 exports.ingestLogs = async (req, res, next) => {
     try {
         const { application, environment, logs } = req.body;
@@ -49,9 +61,15 @@ exports.ingestLogs = async (req, res, next) => {
         
         const logsToInsert = rawList.map(raw => {
             const l = sanitizeObject(raw);
+            const service = normalizeServiceName(l.service || application);
+            const originatingService = l.originatingService ? normalizeServiceName(l.originatingService) : undefined;
+            const reportingService = l.reportingService ? normalizeServiceName(l.reportingService) : undefined;
+
             return {
                 ...l,
-                service: l.service || application,
+                service,
+                ...(originatingService ? { originatingService } : {}),
+                ...(reportingService ? { reportingService } : {}),
                 environment: l.environment || environment || 'development',
                 timestamp: l.timestamp ? new Date(l.timestamp) : new Date()
             };
@@ -82,7 +100,10 @@ exports.getLogs = async (req, res, next) => {
             query.$or = [
                 { message: { $regex: search, $options: 'i' } },
                 { route: { $regex: search, $options: 'i' } },
-                { requestId: { $regex: search, $options: 'i' } }
+                { requestId: { $regex: search, $options: 'i' } },
+                { failureType: { $regex: search, $options: 'i' } },
+                { 'error.name': { $regex: search, $options: 'i' } },
+                { 'error.message': { $regex: search, $options: 'i' } }
             ];
         }
 

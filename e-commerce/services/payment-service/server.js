@@ -35,9 +35,38 @@ app.use(createFailureInjector({ serviceName: 'payment-service', metrics, logger 
 app.use('/api/payments', paymentRoutes);
 
 app.use((err, req, res, next) => {
-    const status = err.status || 500;
-    logger.error("Internal Server Error", { requestId: req.headers['x-request-id'], status, error: err.message, stack: err.stack });
-    res.status(status).json({ success: false, message: 'Internal Server Error' });
+    const status = err.statusCode || err.status || 500;
+    const service = process.env.OTEL_SERVICE_NAME || process.env.SERVICE_NAME || 'payment-service';
+    const route = (req.route && req.route.path) ? req.baseUrl + req.route.path : (req.originalUrl || req.path || '/api/payments');
+    const method = req.method || 'POST';
+    const errorName = err.name || 'Error';
+    const errorMessage = err.message || 'Payment service error occurred';
+    const errorStack = err.stack || null;
+
+    logger.error(errorMessage, {
+        service,
+        originatingService: err.originatingService || service,
+        reportingService: null,
+        method,
+        route,
+        statusCode: status,
+        requestId: req.headers['x-request-id'],
+        error: {
+            name: errorName,
+            message: errorMessage,
+            stack: errorStack
+        },
+        stack: errorStack,
+        database: errorName.includes('Mongo') || errorMessage.includes('Mongo') ? 'MongoDB' : 'Not involved',
+        category: errorName.includes('Mongo') ? 'database_query_error' : (status === 400 ? 'validation_error' : 'internal_error')
+    });
+
+    res.status(status).json({
+        success: false,
+        error: errorMessage,
+        errorType: errorName,
+        service
+    });
 });
 
 const PORT = process.env.PORT || 3004;

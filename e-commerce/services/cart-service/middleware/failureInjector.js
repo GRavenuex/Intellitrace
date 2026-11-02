@@ -109,7 +109,8 @@ function createFailureInjector({ serviceName, metrics, logger }) {
 
         const reqPath = (req.originalUrl || req.url || req.path).toLowerCase();
         const matchingRule = activeRules.find(rule => {
-            if (!rule.targetRoute || rule.targetRoute === '*' || rule.targetRoute === 'all') return true;
+            if (!rule.targetRoute || rule.targetRoute === '*' || rule.targetRoute === 'all' || 
+                rule.failureType === 'service_communication_failure' || rule.failureType === 'cascading_failure') return true;
             const target = rule.targetRoute.toLowerCase();
             return reqPath.includes(target) || target.includes(reqPath) ||
                    (target.includes('product') && reqPath.includes('product')) ||
@@ -190,10 +191,13 @@ function createFailureInjector({ serviceName, metrics, logger }) {
         }
 
         if (fType === 'http_500' || fType === 'intermittent') {
+            const injectedError = new Error(`Injected HTTP 500 on ${req.path}`);
+            injectedError.name = 'HTTP 500 InternalServerError';
+
             if (activeSpan) {
                 const { SpanStatusCode } = require('@opentelemetry/api');
-                activeSpan.setStatus({ code: SpanStatusCode.ERROR, message: 'Injected HTTP 500 Internal Server Error' });
-                activeSpan.recordException(new Error('Injected HTTP 500 Internal Server Error'));
+                activeSpan.setStatus({ code: SpanStatusCode.ERROR, message: injectedError.message });
+                activeSpan.recordException(injectedError);
                 activeSpan.setAttribute('failure.injected', true);
                 activeSpan.setAttribute('failure.type', 'http_500');
             }
@@ -208,19 +212,32 @@ function createFailureInjector({ serviceName, metrics, logger }) {
             if (logger) {
                 logger.error(`FAILURE_INJECTION_TRIGGERED: Injected HTTP 500 on ${req.path}`, {
                     service: serviceName,
+                    originatingService: serviceName,
                     failureId,
                     failureType: 'HTTP_500',
                     targetOperation: req.path,
+                    route: req.path,
+                    method: req.method || 'POST',
+                    statusCode: 500,
                     requestId,
                     traceId,
                     spanId,
+                    error: {
+                        name: injectedError.name,
+                        message: injectedError.message,
+                        stack: injectedError.stack
+                    },
+                    stack: injectedError.stack,
+                    category: 'internal_error',
+                    database: 'Not involved',
                     environment: process.env.NODE_ENV || 'development'
                 });
             }
 
             return res.status(500).json({
                 success: false,
-                error: 'Internal Server Error (Simulated Injected Failure)',
+                error: `FAILURE_INJECTION_TRIGGERED: Injected HTTP 500 on ${req.path}`,
+                errorType: 'HTTP 500 InternalServerError',
                 failureType: 'http_500',
                 failureId,
                 service: serviceName
@@ -266,10 +283,13 @@ function createFailureInjector({ serviceName, metrics, logger }) {
         }
 
         if (fType === 'database_timeout') {
+            const dbError = new Error('MongoTimeoutError: Operation exceeded application timeout limit of 5000ms (Simulated DB Timeout)');
+            dbError.name = 'MongoTimeoutError';
+
             if (activeSpan) {
                 const { SpanStatusCode } = require('@opentelemetry/api');
                 activeSpan.setStatus({ code: SpanStatusCode.ERROR, message: 'Simulated MongoDB Connection Timeout' });
-                activeSpan.recordException(new Error('MongoTimeoutError: Operation exceeded application timeout limit of 5000ms (Simulated DB Timeout)'));
+                activeSpan.recordException(dbError);
                 activeSpan.setAttribute('failure.injected', true);
                 activeSpan.setAttribute('failure.type', 'database_timeout');
                 activeSpan.setAttribute('db.system', 'mongodb');
@@ -286,14 +306,24 @@ function createFailureInjector({ serviceName, metrics, logger }) {
             if (logger) {
                 logger.error(`FAILURE_INJECTION_TRIGGERED: Injected Database Connection Timeout on ${req.path}`, {
                     service: serviceName,
+                    originatingService: serviceName,
                     failureId,
                     failureType: 'DATABASE_TIMEOUT',
-                    database: 'mongodb',
+                    database: 'MongoDB',
+                    category: 'database_query_error',
                     targetOperation: req.path,
+                    route: req.path,
+                    method: req.method || 'GET',
+                    statusCode: 500,
                     requestId,
                     traceId,
                     spanId,
-                    errorMessage: 'MongoTimeoutError: Operation exceeded application timeout limit of 5000ms',
+                    error: {
+                        name: dbError.name,
+                        message: dbError.message,
+                        stack: dbError.stack
+                    },
+                    stack: dbError.stack,
                     environment: process.env.NODE_ENV || 'development'
                 });
             }
@@ -301,6 +331,7 @@ function createFailureInjector({ serviceName, metrics, logger }) {
             return res.status(500).json({
                 success: false,
                 error: 'MongoTimeoutError: Operation exceeded application timeout limit of 5000ms (Simulated DB Timeout)',
+                errorType: 'MongoTimeoutError',
                 failureType: 'database_timeout',
                 failureId,
                 service: serviceName
@@ -308,11 +339,16 @@ function createFailureInjector({ serviceName, metrics, logger }) {
         }
 
         if (fType === 'service_communication_failure') {
-            const destService = matchingRule.sourceService === serviceName && matchingRule.targetOperation ? matchingRule.targetOperation : 'payment-service';
+            const destService = matchingRule.sourceService === serviceName && matchingRule.targetOperation ? matchingRule.targetOperation : (serviceName === 'order-service' ? 'payment-service' : (serviceName === 'cart-service' ? 'product-service' : 'payment-service'));
+            const destPort = destService === 'payment-service' ? '3004' : (destService === 'product-service' ? '3001' : (destService === 'cart-service' ? '3002' : '3003'));
+            const commError = new Error(`connect ECONNREFUSED ${destService}:${destPort}`);
+            commError.name = 'NetworkError';
+            commError.code = 'ECONNREFUSED';
+
             if (activeSpan) {
                 const { SpanStatusCode } = require('@opentelemetry/api');
                 activeSpan.setStatus({ code: SpanStatusCode.ERROR, message: `Downstream call to ${destService} failed: ECONNREFUSED` });
-                activeSpan.recordException(new Error(`connect ECONNREFUSED ${destService}:3004`));
+                activeSpan.recordException(commError);
                 activeSpan.setAttribute('failure.injected', true);
                 activeSpan.setAttribute('failure.type', 'service_communication_failure');
                 activeSpan.setAttribute('peer.service', destService);
@@ -328,15 +364,26 @@ function createFailureInjector({ serviceName, metrics, logger }) {
             if (logger) {
                 logger.error(`FAILURE_INJECTION_TRIGGERED: Downstream service communication failure calling ${destService}`, {
                     service: serviceName,
-                    sourceService: serviceName,
+                    originatingService: destService,
+                    reportingService: serviceName,
                     destinationService: destService,
                     failureId,
                     failureType: 'SERVICE_COMMUNICATION_FAILURE',
                     targetOperation: req.path,
+                    route: req.path,
+                    method: req.method || 'POST',
+                    statusCode: 503,
                     requestId,
                     traceId,
                     spanId,
-                    errorMessage: `connect ECONNREFUSED ${destService}:3004`,
+                    error: {
+                        name: commError.name,
+                        message: commError.message,
+                        stack: commError.stack
+                    },
+                    stack: commError.stack,
+                    category: 'network_error',
+                    database: 'Not involved',
                     environment: process.env.NODE_ENV || 'development'
                 });
             }
@@ -344,6 +391,7 @@ function createFailureInjector({ serviceName, metrics, logger }) {
             return res.status(503).json({
                 success: false,
                 error: `Service Communication Failure: Could not reach downstream ${destService} (ECONNREFUSED)`,
+                errorType: 'NetworkError',
                 failureType: 'service_communication_failure',
                 failureId,
                 sourceService: serviceName,
@@ -352,10 +400,14 @@ function createFailureInjector({ serviceName, metrics, logger }) {
         }
 
         if (fType === 'cascading_failure') {
+            const errName = serviceName === 'payment-service' ? 'PaymentServiceInternalError' : `${serviceName.replace(/-/g, '')}InternalError`;
+            const cascErr = new Error(`${errName}: Transaction processing failed (Cascading Origin)`);
+            cascErr.name = errName;
+
             if (activeSpan) {
                 const { SpanStatusCode } = require('@opentelemetry/api');
-                activeSpan.setStatus({ code: SpanStatusCode.ERROR, message: 'Injected initial payment service failure for cascading scenario' });
-                activeSpan.recordException(new Error('PaymentServiceInternalError: Transaction processing failed (Cascading Origin)'));
+                activeSpan.setStatus({ code: SpanStatusCode.ERROR, message: `Injected initial ${serviceName} failure for cascading scenario` });
+                activeSpan.recordException(cascErr);
                 activeSpan.setAttribute('failure.injected', true);
                 activeSpan.setAttribute('failure.type', 'cascading_failure');
                 activeSpan.setAttribute('cascading.role', 'origin');
@@ -371,21 +423,33 @@ function createFailureInjector({ serviceName, metrics, logger }) {
             if (logger) {
                 logger.error(`FAILURE_INJECTION_TRIGGERED: Injected Cascading Failure Origin on ${req.path}`, {
                     service: serviceName,
+                    originatingService: serviceName,
                     failureId,
                     failureType: 'CASCADING_FAILURE',
                     role: 'origin',
                     targetOperation: req.path,
+                    route: req.path,
+                    method: req.method || 'POST',
+                    statusCode: 500,
                     requestId,
                     traceId,
                     spanId,
-                    errorMessage: 'PaymentServiceInternalError: Transaction processing failed (Cascading Origin)',
+                    error: {
+                        name: cascErr.name,
+                        message: cascErr.message,
+                        stack: cascErr.stack
+                    },
+                    stack: cascErr.stack,
+                    category: 'internal_error',
+                    database: 'Not involved',
                     environment: process.env.NODE_ENV || 'development'
                 });
             }
 
             return res.status(500).json({
                 success: false,
-                error: 'Payment Service Internal Error (Cascading Failure Origin)',
+                error: `${errName}: Transaction processing failed (Cascading Origin)`,
+                errorType: errName,
                 failureType: 'cascading_failure',
                 failureId,
                 service: serviceName

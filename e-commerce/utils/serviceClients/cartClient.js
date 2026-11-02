@@ -15,15 +15,43 @@ const getHeaders = (requestId) => {
     return headers;
 };
 
+async function handleDownstreamResponse(res, serviceName) {
+    if (res.ok) return await res.json();
+    let errorBody = {};
+    try { errorBody = await res.json(); } catch (_) {}
+    const originalMsg = errorBody.error || errorBody.message || `${serviceName} responded with status ${res.status}`;
+    const err = new Error(originalMsg);
+    err.statusCode = res.status;
+    err.name = errorBody.errorType || 'CartServiceError';
+    err.originatingService = errorBody.service || serviceName;
+    err.reportingService = 'intellishop-gateway';
+    err.downstreamError = originalMsg;
+    throw err;
+}
+
 exports.getCart = async (userId, requestId) => {
     try {
         const res = await fetch(`${CART_SERVICE_URL}/api/cart/${userId}`, {
             headers: getHeaders(requestId)
         });
-        if (!res.ok) throw new Error(`Cart service responded with ${res.status}`);
-        return await res.json();
+        return await handleDownstreamResponse(res, 'cart-service');
     } catch (err) {
-        logger.error("Failed to call cart service getCart", { requestId, userId, error: err.message });
+        logger.error(`Failed to call cart service getCart: ${err.message}`, {
+            service: 'intellishop-gateway',
+            originatingService: err.originatingService || 'cart-service',
+            reportingService: 'intellishop-gateway',
+            route: `/api/cart/${userId}`,
+            method: 'GET',
+            statusCode: err.statusCode || 500,
+            requestId,
+            userId,
+            error: {
+                name: err.name || 'CartClientError',
+                message: err.message,
+                stack: err.stack
+            },
+            stack: err.stack
+        });
         throw err;
     }
 };
@@ -35,10 +63,25 @@ exports.addToCart = async (userId, productId, quantity, requestId) => {
             headers: getHeaders(requestId),
             body: JSON.stringify({ productId, quantity })
         });
-        if (!res.ok) throw new Error(`Cart service responded with ${res.status}`);
-        return await res.json();
+        return await handleDownstreamResponse(res, 'cart-service');
     } catch (err) {
-        logger.error("Failed to call cart service addToCart", { requestId, userId, productId, error: err.message });
+        logger.error(`Failed to call cart service addToCart: ${err.message}`, {
+            service: 'intellishop-gateway',
+            originatingService: err.originatingService || 'cart-service',
+            reportingService: 'intellishop-gateway',
+            route: `/api/cart/${userId}/items`,
+            method: 'POST',
+            statusCode: err.statusCode || 500,
+            requestId,
+            userId,
+            productId,
+            error: {
+                name: err.name || 'CartClientError',
+                message: err.message,
+                stack: err.stack
+            },
+            stack: err.stack
+        });
         throw err;
     }
 };
@@ -50,10 +93,25 @@ exports.updateCartItem = async (userId, productId, quantity, requestId) => {
             headers: getHeaders(requestId),
             body: JSON.stringify({ quantity })
         });
-        if (!res.ok) throw new Error(`Cart service responded with ${res.status}`);
-        return await res.json();
+        return await handleDownstreamResponse(res, 'cart-service');
     } catch (err) {
-        logger.error("Failed to call cart service updateCartItem", { requestId, userId, productId, error: err.message });
+        logger.error(`Failed to call cart service updateCartItem: ${err.message}`, {
+            service: 'intellishop-gateway',
+            originatingService: err.originatingService || 'cart-service',
+            reportingService: 'intellishop-gateway',
+            route: `/api/cart/${userId}/items/${productId}`,
+            method: 'PUT',
+            statusCode: err.statusCode || 500,
+            requestId,
+            userId,
+            productId,
+            error: {
+                name: err.name || 'CartClientError',
+                message: err.message,
+                stack: err.stack
+            },
+            stack: err.stack
+        });
         throw err;
     }
 };

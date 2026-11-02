@@ -3,26 +3,37 @@ const logger = require('./logger');
 
 const errorHandler = (err, req, res, next) => {
     const statusCode = err.statusCode || 500;
-    const serviceName = err.service || 'intellishop';
+    const originatingService = err.originatingService || err.service || 'intellishop-gateway';
     const message = err.message || 'An unexpected error occurred';
+    const errorName = err.name || (err.constructor ? err.constructor.name : 'Error');
 
     const userId = (req.session && req.session.user && (req.session.user.id || req.session.user._id)) || null;
-    const routePath = (req.route && req.route.path) ? req.route.path : req.originalUrl;
+    const routePath = (req.route && req.route.path) ? req.route.path : (req.originalUrl || req.path || 'unknown');
 
     logger.error(message, {
-        method: req.method,
+        service: 'intellishop-gateway',
+        originatingService,
+        reportingService: 'intellishop-gateway',
+        method: req.method || 'GET',
         route: routePath,
         statusCode,
         userId: userId,
-        error: err.name || 'Error',
-        stack: err.stack
+        error: {
+            name: errorName,
+            message: message,
+            stack: err.stack || null
+        },
+        stack: err.stack || null,
+        database: err.database || (errorName.includes('Mongo') || message.includes('Mongo') ? 'MongoDB' : 'Not involved'),
+        category: err.category || (errorName.includes('Mongo') ? 'database_query_error' : (statusCode === 400 ? 'validation_error' : 'internal_error'))
     });
 
-    if (req.originalUrl.startsWith('/api')) {
+    if (req.originalUrl && req.originalUrl.startsWith('/api')) {
         return res.status(statusCode).json({
             success: false,
             error: message,
-            service: serviceName
+            errorType: errorName,
+            service: originatingService
         });
     }
 

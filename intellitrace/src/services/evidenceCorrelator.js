@@ -52,6 +52,25 @@ async function safeFetchJson(url, timeoutMs = 2500) {
     }
 }
 
+function getServiceQueryVariants(services) {
+    const set = new Set();
+    const list = Array.isArray(services) ? services : [services];
+    for (const s of list) {
+        if (!s) continue;
+        set.add(s);
+        if (s.startsWith('intellishop-')) {
+            set.add(s.replace('intellishop-', ''));
+        } else {
+            set.add(`intellishop-${s}`);
+        }
+        if (s === 'intellishop-gateway' || s === 'gateway') {
+            set.add('intellishop');
+            set.add('intellishop-gateway');
+        }
+    }
+    return Array.from(set);
+}
+
 function generateEvidenceId() {
     const rand = Math.random().toString(36).substring(2, 7).toUpperCase();
     return `EVD-${new Date().toISOString().slice(2, 10).replace(/-/g, '')}-${rand}`;
@@ -119,6 +138,7 @@ async function correlateIncidentEvidence(incidentIdOrObj, options = {}) {
     // =========================================================================
     let matchedLogs = [];
     try {
+        const queryServices = getServiceQueryVariants(affectedServices);
         // Query logs across 4 priority levels
         const [exactTraceLogs, exactReqLogs, serviceErrorLogs, generalLogs] = await Promise.all([
             relatedTraceIds.size > 0 
@@ -128,12 +148,12 @@ async function correlateIncidentEvidence(incidentIdOrObj, options = {}) {
                 ? Log.find({ requestId: { $in: Array.from(relatedRequestIds) } }).sort('-timestamp').limit(50).lean()
                 : Promise.resolve([]),
             Log.find({
-                service: { $in: affectedServices },
+                service: { $in: queryServices },
                 timestamp: { $gte: windowStart, $lte: windowEnd },
                 level: { $in: ['ERROR', 'WARN'] }
             }).sort('-timestamp').limit(50).lean(),
             Log.find({
-                service: { $in: affectedServices },
+                service: { $in: queryServices },
                 timestamp: { $gte: windowStart, $lte: windowEnd }
             }).sort('-timestamp').limit(50).lean()
         ]);
@@ -175,11 +195,80 @@ async function correlateIncidentEvidence(incidentIdOrObj, options = {}) {
         console.warn(`[EvidenceCorrelator] Log query warning: ${err.message}`);
     }
 
+    // Helper to identify generic wrapper / upstream proxy error messages
+    const isGenericWrapperMessage = (msg) => {
+        if (!msg) return false;
+        const lower = msg.toLowerCase();
+        return (
+            lower.includes('responded with 500') ||
+            lower.includes('responded with 502') ||
+            lower.includes('responded with 503') ||
+            lower.includes('responded with 504') ||
+            lower.includes('payment service responded with') ||
+            lower.includes('order service responded with') ||
+            lower.includes('product service responded with') ||
+            lower.includes('cart service responded with') ||
+            lower === 'internal server error' ||
+            lower === 'request failed'
+        );
+    };
+
+    // Score candidates to prioritize genuine root technical exceptions over upstream proxy wrappers
+    const scoreErrorCandidate = (item) => {
+        const log = item.log;
+        let score = (item.confidence || 0) * 100;
+
+        // 1. Has real stack trace
+        const hasStack = Boolean(log.stack || (log.error && log.error.stack));
+        if (hasStack) score += 60;
+
+        // 2. Has specific error object / errorType
+        const errorObj = typeof log.error === 'object' ? log.error : null;
+        if (errorObj && errorObj.name && errorObj.name !== 'Error' && errorObj.name !== 'HTTP 500 InternalServerError') {
+            score += 40;
+        }
+
+        // 3. Downstream leaf service vs Gateway
+        const svc = log.service || '';
+        const isGateway = svc === 'intellishop-gateway' || svc === 'intellishop';
+        if (!isGateway) {
+            score += 40;
+        }
+        if (svc === primaryService || log.originatingService === primaryService) {
+            score += 35;
+        }
+
+        // 4. Originating service explicitly specified
+        if (log.originatingService && !isGateway) {
+            score += 25;
+        }
+
+        // 5. Penalize generic upstream wrapper logs
+        const msg = log.errorMessage || (errorObj && errorObj.message) || log.message || '';
+        if (isGenericWrapperMessage(msg)) {
+            score -= 70;
+        }
+
+        // 6. Real specific technical exceptions get highest boost
+        const fullText = `${log.errorType || ''} ${errorObj?.name || ''} ${msg}`.toLowerCase();
+        if (fullText.includes('mongoserverselectionerror') || fullText.includes('mongotimeouterror')) {
+            score += 50;
+        }
+        if (fullText.includes('econnrefused')) {
+            score += 40;
+        }
+        if (fullText.includes('typeerror') || fullText.includes('referenceerror')) {
+            score += 35;
+        }
+
+        return score;
+    };
+
     // Extract actual technical error from matched logs
     let actualError = null;
     const errorCandidates = matchedLogs
         .filter(item => item.log.level === 'ERROR' || item.log.statusCode >= 500 || item.log.error || item.log.stack)
-        .sort((a, b) => b.confidence - a.confidence);
+        .sort((a, b) => scoreErrorCandidate(b) - scoreErrorCandidate(a));
 
     if (errorCandidates.length > 0) {
         const topErrorLog = errorCandidates[0].log;
@@ -189,7 +278,7 @@ async function correlateIncidentEvidence(incidentIdOrObj, options = {}) {
             evidenceId: generateEvidenceId(),
             incidentId: incident.incidentId,
             evidenceType: 'error_detail',
-            sourceService: actualError.service,
+            sourceService: actualError.originatingService || actualError.service,
             timestamp: actualError.timestamp,
             requestId: actualError.requestId,
             traceId: actualError.traceId,
@@ -202,7 +291,7 @@ async function correlateIncidentEvidence(incidentIdOrObj, options = {}) {
         });
 
         confirmedObservations.push(
-            `Service ${actualError.service} encountered ${actualError.errorType}: "${actualError.errorMessage}" on ${actualError.method || 'REQUEST'} ${actualError.route || 'operation'}.`
+            `Service ${actualError.originatingService || actualError.service} encountered ${actualError.errorType}: "${actualError.errorMessage}" on ${actualError.method || 'REQUEST'} ${actualError.route || 'operation'}.`
         );
     } else {
         if (incident.category === 'latency') {
@@ -546,18 +635,21 @@ async function correlateIncidentEvidence(incidentIdOrObj, options = {}) {
             }
         }
 
-        if (actualError?.database || actualError?.category === 'database' || incident.category === 'database') {
+        if (actualError?.database === 'MongoDB' || actualError?.category === 'database_connection_error' || actualError?.category === 'database_query_error' || incident.category === 'database') {
             databaseInvolved = true;
             suspectedExplanations.push(
-                `MongoDB database operation timeouts in ${primaryService} likely blocked incoming client requests.`
+                `MongoDB database operations in ${actualError?.originatingService || primaryService} encountered an exception and blocked incoming client requests.`
             );
         }
 
         if (affectedServices.length > 1) {
-            const downstream = affectedServices.filter(s => s !== primaryService);
-            suspectedExplanations.push(
-                `Downstream services (${downstream.join(', ')}) experienced secondary impact due to failures originating in ${primaryService}.`
-            );
+            const originSvc = actualError?.originatingService || primaryService;
+            const downstream = affectedServices.filter(s => s !== originSvc);
+            if (downstream.length > 0) {
+                suspectedExplanations.push(
+                    `Services (${downstream.join(', ')}) experienced secondary impact due to failures originating in ${originSvc}.`
+                );
+            }
         }
     } catch (err) {
         console.warn(`[EvidenceCorrelator] Dependency analysis error: ${err.message}`);
@@ -578,35 +670,36 @@ async function correlateIncidentEvidence(incidentIdOrObj, options = {}) {
 
     // Build structured relevant dependencies for Section C
     const relevantDependencies = [];
+    const rootOriginService = actualError?.originatingService || primaryService;
 
-    // 1. Primary Failing Service
+    // 1. Originating Failing Service
     relevantDependencies.push({
-        name: getReadableServiceName(primaryService),
-        slug: primaryService,
+        name: getReadableServiceName(rootOriginService),
+        slug: rootOriginService,
         type: 'service',
-        relationship: 'Primary Failing Service',
-        healthStatus: serviceHealthMap[primaryService]?.status || 'degraded',
+        relationship: 'Originating Failing Service',
+        healthStatus: serviceHealthMap[rootOriginService]?.status || 'degraded',
         isFailing: true,
         errorDetails: actualError?.errorMessage || incident.title
     });
 
-    // 2. Downstream Impacted Services
+    // 2. Affected / Impacted Services
     (incident.affectedServices || [])
-        .filter(s => s !== primaryService)
+        .filter(s => s !== rootOriginService)
         .forEach(svc => {
             relevantDependencies.push({
                 name: getReadableServiceName(svc),
                 slug: svc,
                 type: 'service',
-                relationship: 'Affected Downstream Service',
+                relationship: 'Impacted Service',
                 healthStatus: serviceHealthMap[svc]?.status || 'degraded',
                 isFailing: true,
-                errorDetails: `Secondary impact originating from ${getReadableServiceName(primaryService)}`
+                errorDetails: `Secondary impact originating from ${getReadableServiceName(rootOriginService)}`
             });
         });
 
-    // 3. Upstream Caller
-    if (!affectedServices.includes('intellishop-gateway')) {
+    // 3. Upstream Gateway Caller
+    if (rootOriginService !== 'intellishop-gateway') {
         relevantDependencies.push({
             name: 'API Gateway',
             slug: 'intellishop-gateway',
@@ -619,8 +712,8 @@ async function correlateIncidentEvidence(incidentIdOrObj, options = {}) {
     }
 
     // 4. Database Dependency
-    if (databaseInvolved || actualError?.database || incident.category === 'database') {
-        const isDbError = actualError?.category === 'database' || incident.category === 'database';
+    if (databaseInvolved || actualError?.database === 'MongoDB' || incident.category === 'database') {
+        const isDbError = actualError?.category === 'database_query_error' || actualError?.category === 'database_connection_error' || incident.category === 'database';
         relevantDependencies.push({
             name: 'MongoDB Database',
             slug: 'mongodb',
@@ -633,23 +726,28 @@ async function correlateIncidentEvidence(incidentIdOrObj, options = {}) {
     }
 
     // Dynamic technical explanation
-    const serviceLabel = getReadableServiceName(primaryService);
+    const serviceLabel = getReadableServiceName(rootOriginService);
     const routeDesc = actualError?.route ? `on ${actualError.method || 'REQUEST'} ${actualError.route}` : '';
     let technicalSummary = '';
 
-    if (actualError?.category === 'database' || databaseInvolved) {
-        technicalSummary = `${serviceLabel} is failing ${routeDesc} because database operations encountered a query timeout exception. The observed exception is ${actualError?.errorType || 'Database Error'}: "${actualError?.errorMessage || 'Operation timed out'}", indicating that the application could not execute MongoDB queries within the configured timeout limit.`;
-    } else if (actualError?.category === 'communication') {
-        technicalSummary = `${serviceLabel} failed while communicating with downstream dependency (${actualError?.errorMessage || 'Connection failed'}). Upstream client requests returned HTTP ${actualError?.statusCode || 500} server errors.`;
+    if (actualError?.category === 'database_connection_error' || actualError?.category === 'database_query_error' || databaseInvolved) {
+        technicalSummary = `${serviceLabel} is failing ${routeDesc} because database operations encountered an exception (${actualError?.errorType || 'Database Error'}: "${actualError?.errorMessage || 'Operation timed out'}"). The database involved is ${actualError?.database || 'MongoDB'}.`;
+    } else if (actualError?.category === 'network_error') {
+        technicalSummary = `${serviceLabel} failed due to a network communication error (${actualError?.errorType || 'Network Error'}: "${actualError?.errorMessage || 'Connection failed'}"). Destination service was unreachable.`;
+    } else if (actualError?.category === 'validation_error') {
+        technicalSummary = `${serviceLabel} rejected requests due to validation failure (${actualError?.errorType || 'Validation Error'}: "${actualError?.errorMessage || 'Invalid payload'}"). HTTP status ${actualError?.statusCode || 400}.`;
+    } else if (actualError?.category === 'dependency_error') {
+        technicalSummary = `${serviceLabel} encountered a dependency error communicating with upstream or downstream services (${actualError?.errorMessage || 'Dependency unavailable'}).`;
+    } else if (actualError?.category === 'timeout_error') {
+        technicalSummary = `${serviceLabel} timed out executing ${routeDesc} (${actualError?.errorMessage || 'Request timed out'}).`;
+    } else if (actualError?.category === 'application_error') {
+        technicalSummary = `${serviceLabel} threw an unhandled application exception (${actualError?.errorType || 'Application Error'}: "${actualError?.errorMessage || 'Exception occurred'}").`;
     } else if (actualError?.category === 'latency' || incident.category === 'latency') {
         technicalSummary = `${serviceLabel} is experiencing abnormal response latency ${routeDesc}, exceeding response time thresholds without an unhandled exception crash.`;
     } else if (actualError?.category === 'capacity' || incident.category === 'capacity') {
         technicalSummary = `${serviceLabel} encountered an abnormal surge in request concurrency and traffic volume ${routeDesc}, causing queue saturation and elevated error rates.`;
-    } else if (actualError?.category === 'cascade' || incident.category === 'cascade') {
-        const downstreamList = (incident.affectedServices || []).filter(s => s !== primaryService).map(getReadableServiceName);
-        technicalSummary = `${serviceLabel} experienced an internal failure that propagated downstream, impacting ${downstreamList.join(', ')}.`;
     } else {
-        technicalSummary = `${serviceLabel} is returning HTTP ${actualError?.statusCode || 500} Internal Server Error ${routeDesc}. The observed exception is ${actualError?.errorType || 'Application Error'}: "${actualError?.errorMessage || incident.description}".`;
+        technicalSummary = `${serviceLabel} is returning HTTP ${actualError?.statusCode || 500} (${actualError?.errorType || 'Application Error'}: "${actualError?.errorMessage || incident.description}").`;
     }
 
     // Only relevant missing information

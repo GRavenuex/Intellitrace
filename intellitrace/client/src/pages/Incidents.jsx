@@ -534,21 +534,37 @@ export default function Incidents() {
                         </div>
 
                         {/* Error Properties Grid */}
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 p-4 rounded-xl bg-gray-50 border border-gray-200 text-xs">
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 p-5 rounded-xl bg-gray-50 border border-gray-200 text-xs">
                             <div>
-                                <span className="text-gray-400 block font-medium">Affected Service</span>
-                                <span className="font-semibold text-gray-800">{errDetails?.service || inc?.primaryService}</span>
+                                <span className="text-gray-400 block font-medium">Originating Service</span>
+                                <span className="font-semibold text-rose-700">
+                                    {SERVICE_LABELS[errDetails?.originatingService] || errDetails?.originatingService || SERVICE_LABELS[inc?.primaryService] || inc?.primaryService}
+                                </span>
                             </div>
                             <div>
-                                <span className="text-gray-400 block font-medium">API Endpoint</span>
+                                <span className="text-gray-400 block font-medium">Affected Service</span>
+                                <span className="font-semibold text-gray-800">
+                                    {SERVICE_LABELS[errDetails?.service] || errDetails?.service || SERVICE_LABELS[inc?.primaryService] || inc?.primaryService}
+                                </span>
+                            </div>
+                            <div>
+                                <span className="text-gray-400 block font-medium">Reporting Service</span>
+                                <span className="font-medium text-gray-700">
+                                    {SERVICE_LABELS[errDetails?.reportingService] || errDetails?.reportingService || '—'}
+                                </span>
+                            </div>
+                            <div>
+                                <span className="text-gray-400 block font-medium">API Endpoint & Method</span>
                                 <span className="font-mono font-semibold text-gray-800">
-                                    {errDetails?.method || 'REQUEST'} {errDetails?.route || '—'}
+                                    {errDetails?.route ? `${errDetails?.method || 'GET'} ${errDetails.route}` : 'Endpoint information unavailable'}
                                 </span>
                             </div>
                             <div>
                                 <span className="text-gray-400 block font-medium">Source File</span>
-                                <span className="font-mono font-semibold text-gray-800">
-                                    {errDetails?.sourceFile || 'Source file information unavailable.'}
+                                <span className="font-mono font-semibold text-gray-800 break-all" title={errDetails?.sourceFile}>
+                                    {errDetails?.sourceFile && errDetails.sourceFile !== 'Source file information unavailable.'
+                                        ? `${errDetails.sourceFile}${errDetails.lineNumber != null ? `:${errDetails.lineNumber}${errDetails.columnNumber != null ? `:${errDetails.columnNumber}` : ''}` : ''}`
+                                        : 'Source file information unavailable.'}
                                 </span>
                             </div>
                             <div>
@@ -558,20 +574,40 @@ export default function Incidents() {
                                 </span>
                             </div>
                             <div>
-                                <span className="text-gray-400 block font-medium">Timestamp</span>
-                                <span className="text-gray-700">{formatTimestamp(errDetails?.timestamp || inc?.lastDetectedAt)}</span>
+                                <span className="text-gray-400 block font-medium">Line Number</span>
+                                <span className="font-mono font-semibold text-gray-800">
+                                    {errDetails?.lineNumber != null ? errDetails.lineNumber : 'Line information unavailable.'}
+                                </span>
                             </div>
                             <div>
                                 <span className="text-gray-400 block font-medium">HTTP Status</span>
-                                <span className="font-bold text-gray-800">{errDetails?.statusCode || 500}</span>
+                                <span className="font-bold text-gray-800">
+                                    {errDetails?.statusCode || '—'}
+                                </span>
                             </div>
                             <div>
-                                <span className="text-gray-400 block font-medium">Database</span>
-                                <span className="text-gray-800 capitalize">{errDetails?.database || (deps?.databaseInvolved ? 'MongoDB' : 'None')}</span>
+                                <span className="text-gray-400 block font-medium">Database / Dependency</span>
+                                <span className="font-semibold text-gray-800">
+                                    {errDetails?.database || (deps?.databaseInvolved ? 'MongoDB' : 'Not involved')}
+                                </span>
                             </div>
                             <div>
-                                <span className="text-gray-400 block font-medium">Category</span>
-                                <span className="font-semibold text-gray-800 uppercase">{errDetails?.category || inc?.category || 'General'}</span>
+                                <span className="text-gray-400 block font-medium">Error Category</span>
+                                <span className="font-semibold text-gray-800 uppercase tracking-wider text-[11px] bg-gray-200/80 px-2 py-0.5 rounded inline-block">
+                                    {errDetails?.category || 'internal_error'}
+                                </span>
+                            </div>
+                            <div>
+                                <span className="text-gray-400 block font-medium">Timestamp</span>
+                                <span className="text-gray-700">
+                                    {formatTimestamp(errDetails?.timestamp || inc?.lastDetectedAt)}
+                                </span>
+                            </div>
+                            <div>
+                                <span className="text-gray-400 block font-medium">Trace ID</span>
+                                <span className="font-mono text-gray-600 truncate block" title={errDetails?.traceId || inc?.relatedTraceIds?.[0] || '—'}>
+                                    {errDetails?.traceId || inc?.relatedTraceIds?.[0] || '—'}
+                                </span>
                             </div>
                         </div>
 

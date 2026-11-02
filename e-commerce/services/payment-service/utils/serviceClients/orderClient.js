@@ -13,15 +13,73 @@ const getHeaders = (requestId) => {
 exports.getOrderById = async (id, requestId) => {
     try {
         const res = await fetch(`${ORDER_SERVICE_URL}/api/orders/${id}`, { headers: getHeaders(requestId) });
-        if (!res.ok) throw new Error(`Order service responded with ${res.status}`);
+        if (!res.ok) {
+            let errorBody = {};
+            try { errorBody = await res.json(); } catch (_) {}
+            const originalMsg = errorBody.error || errorBody.message || `Order service responded with ${res.status}`;
+            const err = new Error(originalMsg);
+            err.statusCode = res.status;
+            err.name = errorBody.errorType || 'OrderServiceError';
+            err.originatingService = errorBody.service || 'order-service';
+            err.reportingService = 'payment-service';
+            throw err;
+        }
         return await res.json();
-    } catch (err) { logger.error("Failed to call order service getOrderById", { requestId, orderId: id, error: err.message }); throw err; }
+    } catch (err) {
+        logger.error(`Failed to call order service getOrderById: ${err.message}`, {
+            service: 'payment-service',
+            originatingService: err.originatingService || 'order-service',
+            reportingService: 'payment-service',
+            route: `/api/orders/${id}`,
+            method: 'GET',
+            requestId,
+            orderId: id,
+            statusCode: err.statusCode || 500,
+            error: {
+                name: err.name || 'OrderClientError',
+                message: err.message,
+                stack: err.stack
+            },
+            stack: err.stack,
+            category: 'dependency_error'
+        });
+        throw err;
+    }
 };
 
 exports.updateOrder = async (id, updateData, requestId) => {
     try {
         const res = await fetch(`${ORDER_SERVICE_URL}/api/orders/${id}`, { method: 'PUT', headers: getHeaders(requestId), body: JSON.stringify(updateData) });
-        if (!res.ok) throw new Error(`Order service responded with ${res.status}`);
+        if (!res.ok) {
+            let errorBody = {};
+            try { errorBody = await res.json(); } catch (_) {}
+            const originalMsg = errorBody.error || errorBody.message || `Order service responded with ${res.status}`;
+            const err = new Error(originalMsg);
+            err.statusCode = res.status;
+            err.name = errorBody.errorType || 'OrderServiceError';
+            err.originatingService = errorBody.service || 'order-service';
+            err.reportingService = 'payment-service';
+            throw err;
+        }
         return await res.json();
-    } catch (err) { logger.error("Failed to call order service updateOrder", { requestId, orderId: id, error: err.message }); throw err; }
+    } catch (err) {
+        logger.error(`Failed to call order service updateOrder: ${err.message}`, {
+            service: 'payment-service',
+            originatingService: err.originatingService || 'order-service',
+            reportingService: 'payment-service',
+            route: `/api/orders/${id}`,
+            method: 'PUT',
+            requestId,
+            orderId: id,
+            statusCode: err.statusCode || 500,
+            error: {
+                name: err.name || 'OrderClientError',
+                message: err.message,
+                stack: err.stack
+            },
+            stack: err.stack,
+            category: 'dependency_error'
+        });
+        throw err;
+    }
 };

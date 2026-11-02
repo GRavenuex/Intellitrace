@@ -45,19 +45,35 @@ exports.verifyPaymentChannel = async (requestId) => {
                     }
                     resolve({ success: true, status: 'ready' });
                 } else {
-                    const err = new Error(`Downstream payment service responded with status ${res.statusCode}: ${data}`);
+                    let parsedData = {};
+                    try { parsedData = JSON.parse(data); } catch (_) {}
+                    const originalMsg = parsedData.error || parsedData.message || `Payment service returned status ${res.statusCode}`;
+                    const err = new Error(originalMsg);
                     err.statusCode = res.statusCode;
+                    err.name = parsedData.errorType || 'PaymentServiceError';
+                    err.originatingService = parsedData.service || 'payment-service';
+                    err.reportingService = 'order-service';
+                    err.downstreamError = originalMsg;
                     if (clientSpan) {
                         clientSpan.recordException(err);
                         clientSpan.setStatus({ code: 2, message: err.message });
                         clientSpan.end();
                     }
-                    logger.error("Downstream payment service verification failed", {
+                    logger.error(`Downstream payment service verification failed: ${originalMsg}`, {
                         service: 'order-service',
-                        destinationService: 'payment-service',
+                        originatingService: 'payment-service',
+                        reportingService: 'order-service',
+                        route: '/api/payments/verify-channel',
+                        method: 'POST',
                         requestId,
                         statusCode: res.statusCode,
-                        error: err.message
+                        error: {
+                            name: err.name,
+                            message: originalMsg,
+                            stack: err.stack
+                        },
+                        stack: err.stack,
+                        category: 'dependency_error'
                     });
                     reject(err);
                 }
@@ -65,16 +81,28 @@ exports.verifyPaymentChannel = async (requestId) => {
         });
 
         req.on('error', (err) => {
+            err.originatingService = 'payment-service';
+            err.reportingService = 'order-service';
             if (clientSpan) {
                 clientSpan.recordException(err);
                 clientSpan.setStatus({ code: 2, message: err.message });
                 clientSpan.end();
             }
-            logger.error("Downstream payment service connection error", {
+            logger.error(`Downstream payment service connection error: ${err.message}`, {
                 service: 'order-service',
-                destinationService: 'payment-service',
+                originatingService: 'payment-service',
+                reportingService: 'order-service',
+                route: '/api/payments/verify-channel',
+                method: 'POST',
                 requestId,
-                error: err.message
+                statusCode: 500,
+                error: {
+                    name: err.code || err.name || 'NetworkError',
+                    message: err.message,
+                    stack: err.stack
+                },
+                stack: err.stack,
+                category: 'network_error'
             });
             reject(err);
         });

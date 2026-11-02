@@ -22,10 +22,35 @@ exports.processPayment = async (paymentData, requestId) => {
             headers: getHeaders(requestId),
             body: JSON.stringify(paymentData)
         });
-        if (!res.ok) throw new Error(`Payment service responded with ${res.status}`);
+        if (!res.ok) {
+            let errorBody = {};
+            try { errorBody = await res.json(); } catch (_) {}
+            const originalMsg = errorBody.error || errorBody.message || `Payment service responded with ${res.status}`;
+            const err = new Error(originalMsg);
+            err.statusCode = res.status;
+            err.name = errorBody.errorType || 'PaymentServiceError';
+            err.originatingService = errorBody.service || 'payment-service';
+            err.reportingService = 'intellishop-gateway';
+            err.downstreamError = originalMsg;
+            throw err;
+        }
         return await res.json();
     } catch (err) {
-        logger.error("Failed to call payment service processPayment", { requestId, error: err.message });
+        logger.error(`Failed to call payment service processPayment: ${err.message}`, {
+            service: 'intellishop-gateway',
+            originatingService: err.originatingService || 'payment-service',
+            reportingService: 'intellishop-gateway',
+            route: '/api/payments',
+            method: 'POST',
+            statusCode: err.statusCode || 500,
+            requestId,
+            error: {
+                name: err.name || 'PaymentClientError',
+                message: err.message,
+                stack: err.stack
+            },
+            stack: err.stack
+        });
         throw err;
     }
 };
@@ -33,10 +58,35 @@ exports.processPayment = async (paymentData, requestId) => {
 exports.getPaymentById = async (id, requestId) => {
     try {
         const res = await fetch(`${PAYMENT_SERVICE_URL}/api/payments/${id}`, { headers: getHeaders(requestId) });
-        if (!res.ok) throw new Error(`Payment service responded with ${res.status}`);
+        if (!res.ok) {
+            let errorBody = {};
+            try { errorBody = await res.json(); } catch (_) {}
+            const originalMsg = errorBody.error || errorBody.message || `Payment service responded with ${res.status}`;
+            const err = new Error(originalMsg);
+            err.statusCode = res.status;
+            err.name = errorBody.errorType || 'PaymentServiceError';
+            err.originatingService = errorBody.service || 'payment-service';
+            err.reportingService = 'intellishop-gateway';
+            throw err;
+        }
         return await res.json();
     } catch (err) {
-        logger.error("Failed to call payment service getPaymentById", { requestId, paymentId: id, error: err.message });
+        logger.error(`Failed to call payment service getPaymentById: ${err.message}`, {
+            service: 'intellishop-gateway',
+            originatingService: err.originatingService || 'payment-service',
+            reportingService: 'intellishop-gateway',
+            route: `/api/payments/${id}`,
+            method: 'GET',
+            statusCode: err.statusCode || 500,
+            requestId,
+            paymentId: id,
+            error: {
+                name: err.name || 'PaymentClientError',
+                message: err.message,
+                stack: err.stack
+            },
+            stack: err.stack
+        });
         throw err;
     }
 };

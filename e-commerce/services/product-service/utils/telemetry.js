@@ -2,7 +2,7 @@ const http = require('http');
 
 const INTELLITRACE_URL = process.env.INTELLITRACE_URL || 'http://localhost:4000/api/v1';
 const API_KEY = process.env.INTELLITRACE_API_KEY || 'default_telemetry_key';
-const SERVICE_NAME = 'intellishop-product-service';
+const SERVICE_NAME = process.env.OTEL_SERVICE_NAME || process.env.SERVICE_NAME || 'product-service';
 
 const getHeaders = (dataLength) => ({
     'Content-Type': 'application/json',
