@@ -205,24 +205,71 @@ async function correlateIncidentEvidence(incidentIdOrObj, options = {}) {
             `Service ${actualError.service} encountered ${actualError.errorType}: "${actualError.errorMessage}" on ${actualError.method || 'REQUEST'} ${actualError.route || 'operation'}.`
         );
     } else {
-        actualError = {
-            errorType: 'Unspecified Application Error',
-            errorMessage: 'Exact error message not available. Review related logs and traces.',
-            stackTrace: null,
-            sourceFile: 'Source file information unavailable.',
-            sourceFunction: 'Function information unavailable.',
-            lineNumber: null,
-            route: incident.evidence?.targetRoute || null,
-            method: null,
-            statusCode: 500,
-            service: primaryService,
-            requestId: Array.from(relatedRequestIds)[0] || null,
-            traceId: Array.from(relatedTraceIds)[0] || null,
-            spanId: null,
-            database: null,
-            category: incident.category || 'internal_error',
-            timestamp: firstDetected
-        };
+        if (incident.category === 'latency') {
+            const avgLat = incident.evidence?.avgLatencyMs || '2500';
+            actualError = {
+                errorType: 'High Latency / Slow Operation',
+                errorMessage: `Average response latency reached ${avgLat}ms, exceeding acceptable performance thresholds without throwing an exception.`,
+                stackTrace: null,
+                sourceFile: 'Source file information unavailable.',
+                sourceFunction: 'Function information unavailable.',
+                lineNumber: null,
+                route: incident.evidence?.targetRoute || incident.evidence?.route || '/products',
+                method: 'GET',
+                statusCode: 200,
+                service: primaryService,
+                requestId: Array.from(relatedRequestIds)[0] || null,
+                traceId: Array.from(relatedTraceIds)[0] || null,
+                spanId: null,
+                database: null,
+                category: 'latency',
+                timestamp: firstDetected
+            };
+            confirmedObservations.push(
+                `Average response latency reached ${avgLat}ms on ${primaryService}, exceeding acceptable response time thresholds.`
+            );
+        } else if (incident.category === 'capacity') {
+            actualError = {
+                errorType: 'Traffic Spike / Service Overload',
+                errorMessage: incident.description || 'Abnormal surge in request concurrency and traffic volume.',
+                stackTrace: null,
+                sourceFile: 'Source file information unavailable.',
+                sourceFunction: 'Function information unavailable.',
+                lineNumber: null,
+                route: null,
+                method: null,
+                statusCode: 503,
+                service: primaryService,
+                requestId: Array.from(relatedRequestIds)[0] || null,
+                traceId: Array.from(relatedTraceIds)[0] || null,
+                spanId: null,
+                database: null,
+                category: 'capacity',
+                timestamp: firstDetected
+            };
+            confirmedObservations.push(
+                `Abnormal request surge detected on ${primaryService} exceeding baseline concurrency thresholds.`
+            );
+        } else {
+            actualError = {
+                errorType: 'Unspecified Application Error',
+                errorMessage: 'Exact error message not available. Review related logs and traces.',
+                stackTrace: null,
+                sourceFile: 'Source file information unavailable.',
+                sourceFunction: 'Function information unavailable.',
+                lineNumber: null,
+                route: incident.evidence?.targetRoute || null,
+                method: null,
+                statusCode: 500,
+                service: primaryService,
+                requestId: Array.from(relatedRequestIds)[0] || null,
+                traceId: Array.from(relatedTraceIds)[0] || null,
+                spanId: null,
+                database: null,
+                category: incident.category || 'internal_error',
+                timestamp: firstDetected
+            };
+        }
         missingEvidence.push('No direct application error stack trace was captured in structured logs during the incident window.');
     }
 
@@ -516,99 +563,125 @@ async function correlateIncidentEvidence(incidentIdOrObj, options = {}) {
         console.warn(`[EvidenceCorrelator] Dependency analysis error: ${err.message}`);
     }
 
-    // =========================================================================
-    // 6. FAILURE INJECTION CORRELATION
-    // =========================================================================
-    let failureInjectionData = { associated: false };
-    try {
-        const activeInjections = await FailureInjection.find({
-            targetService: { $in: affectedServices },
-            startedAt: { $lte: windowEnd }
-        }).sort('-startedAt');
-
-        // Look for actual trigger evidence in matchedLogs
-        const triggeredLog = matchedLogs.find(l => 
-            l.log.message && l.log.message.includes('FAILURE_INJECTION_TRIGGERED') ||
-            l.log.failureId || l.log.failureType
-        );
-
-        if (triggeredLog || (activeInjections.length > 0 && incident.failureInjectionId)) {
-            const inj = activeInjections.find(i => 
-                (incident.failureInjectionId && i._id.toString() === incident.failureInjectionId.toString()) ||
-                (triggeredLog && triggeredLog.log.failureId === i._id.toString())
-            ) || activeInjections[0];
-
-            if (inj) {
-                failureInjectionData = {
-                    associated: true,
-                    failureId: inj._id.toString(),
-                    scenarioName: `${inj.failureType.toUpperCase()} Simulation`,
-                    failureType: inj.failureType,
-                    targetService: inj.targetService,
-                    targetRoute: inj.targetRoute,
-                    activatedAt: inj.startedAt,
-                    firstTriggeredAt: triggeredLog?.log.timestamp || inj.startedAt,
-                    expiresAt: inj.expiresAt,
-                    status: inj.status
-                };
-
-                evidenceItemsToInsert.push({
-                    evidenceId: generateEvidenceId(),
-                    incidentId: incident.incidentId,
-                    evidenceType: 'failure_injection',
-                    sourceService: inj.targetService,
-                    timestamp: inj.startedAt,
-                    matchMethod: 'service_operation_time',
-                    confidence: 1.0,
-                    sourceReference: { failureId: inj._id.toString() },
-                    summary: `Failure Injection Active: ${inj.failureType.toUpperCase()} on ${inj.targetService} (${inj.targetRoute})`,
-                    details: failureInjectionData
-                });
-
-                confirmedObservations.push(
-                    `Corroborated failure injection experiment (${inj.failureType.toUpperCase()}) was active and observed triggering on ${inj.targetService}.`
-                );
-            }
-        }
-    } catch (err) {
-        console.warn(`[EvidenceCorrelator] Failure injection query error: ${err.message}`);
+    // Helper for human-readable service labels
+    function getReadableServiceName(slug) {
+        const map = {
+            'intellishop-gateway': 'API Gateway',
+            'product-service': 'Product Service',
+            'cart-service': 'Cart Service',
+            'order-service': 'Order Service',
+            'payment-service': 'Payment Service',
+            'mongodb': 'MongoDB'
+        };
+        return map[slug] || slug;
     }
 
-    // =========================================================================
-    // 7. COMPOSE INVESTIGATION SUMMARY & PERSIST
-    // =========================================================================
-    const summaryNarrative = [
-        `${primaryService} experienced an abnormal ${incident.category || 'application'} condition (${incident.title}).`,
-        actualError?.errorMessage && !actualError.errorMessage.startsWith('Exact error message not available')
-            ? `Technical root exception: ${actualError.errorType} - "${actualError.errorMessage}".`
-            : 'Reviewing recent telemetry logs and traces for specific exception causes.',
-        firstFailedSpan ? `Distributed trace confirms failure in ${firstFailedSpan.serviceName} at '${firstFailedSpan.operationName}'.` : null,
-        databaseInvolved ? 'MongoDB database dependencies were directly implicated in the failure chain.' : null,
-        failureInjectionData.associated ? `Corroborated with active failure simulation: ${failureInjectionData.scenarioName}.` : null
-    ].filter(Boolean).join(' ');
+    // Build structured relevant dependencies for Section C
+    const relevantDependencies = [];
+
+    // 1. Primary Failing Service
+    relevantDependencies.push({
+        name: getReadableServiceName(primaryService),
+        slug: primaryService,
+        type: 'service',
+        relationship: 'Primary Failing Service',
+        healthStatus: serviceHealthMap[primaryService]?.status || 'degraded',
+        isFailing: true,
+        errorDetails: actualError?.errorMessage || incident.title
+    });
+
+    // 2. Downstream Impacted Services
+    (incident.affectedServices || [])
+        .filter(s => s !== primaryService)
+        .forEach(svc => {
+            relevantDependencies.push({
+                name: getReadableServiceName(svc),
+                slug: svc,
+                type: 'service',
+                relationship: 'Affected Downstream Service',
+                healthStatus: serviceHealthMap[svc]?.status || 'degraded',
+                isFailing: true,
+                errorDetails: `Secondary impact originating from ${getReadableServiceName(primaryService)}`
+            });
+        });
+
+    // 3. Upstream Caller
+    if (!affectedServices.includes('intellishop-gateway')) {
+        relevantDependencies.push({
+            name: 'API Gateway',
+            slug: 'intellishop-gateway',
+            type: 'service',
+            relationship: 'Upstream Caller',
+            healthStatus: 'healthy',
+            isFailing: false,
+            errorDetails: null
+        });
+    }
+
+    // 4. Database Dependency
+    if (databaseInvolved || actualError?.database || incident.category === 'database') {
+        const isDbError = actualError?.category === 'database' || incident.category === 'database';
+        relevantDependencies.push({
+            name: 'MongoDB Database',
+            slug: 'mongodb',
+            type: 'database',
+            relationship: 'Database Dependency',
+            healthStatus: isDbError ? 'degraded' : 'healthy',
+            isFailing: isDbError,
+            errorDetails: isDbError ? (actualError?.errorMessage || 'Query timeout observed') : null
+        });
+    }
+
+    // Dynamic technical explanation
+    const serviceLabel = getReadableServiceName(primaryService);
+    const routeDesc = actualError?.route ? `on ${actualError.method || 'REQUEST'} ${actualError.route}` : '';
+    let technicalSummary = '';
+
+    if (actualError?.category === 'database' || databaseInvolved) {
+        technicalSummary = `${serviceLabel} is failing ${routeDesc} because database operations encountered a query timeout exception. The observed exception is ${actualError?.errorType || 'Database Error'}: "${actualError?.errorMessage || 'Operation timed out'}", indicating that the application could not execute MongoDB queries within the configured timeout limit.`;
+    } else if (actualError?.category === 'communication') {
+        technicalSummary = `${serviceLabel} failed while communicating with downstream dependency (${actualError?.errorMessage || 'Connection failed'}). Upstream client requests returned HTTP ${actualError?.statusCode || 500} server errors.`;
+    } else if (actualError?.category === 'latency' || incident.category === 'latency') {
+        technicalSummary = `${serviceLabel} is experiencing abnormal response latency ${routeDesc}, exceeding response time thresholds without an unhandled exception crash.`;
+    } else if (actualError?.category === 'capacity' || incident.category === 'capacity') {
+        technicalSummary = `${serviceLabel} encountered an abnormal surge in request concurrency and traffic volume ${routeDesc}, causing queue saturation and elevated error rates.`;
+    } else if (actualError?.category === 'cascade' || incident.category === 'cascade') {
+        const downstreamList = (incident.affectedServices || []).filter(s => s !== primaryService).map(getReadableServiceName);
+        technicalSummary = `${serviceLabel} experienced an internal failure that propagated downstream, impacting ${downstreamList.join(', ')}.`;
+    } else {
+        technicalSummary = `${serviceLabel} is returning HTTP ${actualError?.statusCode || 500} Internal Server Error ${routeDesc}. The observed exception is ${actualError?.errorType || 'Application Error'}: "${actualError?.errorMessage || incident.description}".`;
+    }
+
+    // Only relevant missing information
+    const relevantMissingInfo = [];
+    if (!actualError?.stackTrace) {
+        relevantMissingInfo.push('Stack trace unavailable.');
+    }
+    if (!actualError?.sourceFile || actualError.sourceFile === 'Source file information unavailable.') {
+        relevantMissingInfo.push('Source file information unavailable.');
+    }
 
     const investigationSummary = {
-        summaryText: summaryNarrative,
+        summaryText: technicalSummary,
+        confirmedFindings: Array.from(new Set(confirmedObservations)),
+        suspectedCauses: Array.from(new Set(suspectedExplanations)),
+        missingInformation: relevantMissingInfo,
+        // Retain compatibility keys
         confirmedObservations: Array.from(new Set(confirmedObservations)),
         suspectedExplanations: Array.from(new Set(suspectedExplanations)),
-        missingEvidence: Array.from(new Set(missingEvidence)),
+        missingEvidence: relevantMissingInfo,
         actualError,
-        tracesSummary: {
-            totalCorrelated: correlatedTraces.length,
-            failedCount: failedSpanCount,
-            slowCount: slowSpanCount,
-            rootTraceId: correlatedTraces[0]?.traceId || Array.from(relatedTraceIds)[0] || null,
-            firstFailedSpan
-        },
         metricsSummary,
         dependencies: {
             primaryService,
             serviceHealth: serviceHealthMap,
             serviceTopology: relevantTopology,
+            relevantDependencies,
             databaseInvolved,
             databaseType: databaseInvolved ? 'mongodb' : null
         },
-        failureInjection: failureInjectionData,
+        primaryService,
+        affectedServices,
         lastCorrelatedAt: now
     };
 

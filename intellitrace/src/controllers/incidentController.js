@@ -1,11 +1,8 @@
 const Incident = require('../models/Incident');
 const IncidentEvidence = require('../models/IncidentEvidence');
-const Log = require('../models/Log');
 const { getRules, getRuleById, updateRule, resetRules } = require('../config/incidentRules');
 const { evaluateIncidentsNow } = require('../services/incidentDetector');
 const { correlateIncidentEvidence } = require('../services/evidenceCorrelator');
-const { fetchJaeger, formatTraceDetail } = require('./traceController');
-const { sanitizeObject } = require('../utils/sanitizer');
 
 // Helper to look up incident by either incidentId (INC-...) or MongoDB _id
 async function findIncident(id) {
@@ -336,145 +333,6 @@ exports.getIncidentEvidence = async (req, res, next) => {
             relatedTraceIds: incident.relatedTraceIds,
             relatedRequestIds: incident.relatedRequestIds,
             failureInjectionDetails: incident.failureInjectionDetails
-        });
-    } catch (err) {
-        next(err);
-    }
-};
-
-// GET /api/incidents/:id/logs - Correlated logs with pagination and filters
-exports.getIncidentLogs = async (req, res, next) => {
-    try {
-        const { id } = req.params;
-        const { level, search, page = 1, limit = 50 } = req.query;
-
-        const incident = await findIncident(id);
-        if (!incident) {
-            return res.status(404).json({ success: false, message: 'Incident not found' });
-        }
-
-        const firstDetected = new Date(incident.firstDetectedAt || incident.createdAt || Date.now());
-        const lastDetected = new Date(incident.lastDetectedAt || firstDetected);
-        const windowStart = new Date(firstDetected.getTime() - 5 * 60 * 1000);
-        const windowEnd = new Date(Math.max(lastDetected.getTime(), Date.now()) + 5 * 60 * 1000);
-        const affectedServices = Array.from(new Set([incident.primaryService, ...(incident.affectedServices || [])]));
-
-        const query = {
-            $or: [
-                { traceId: { $in: incident.relatedTraceIds || [] } },
-                { requestId: { $in: incident.relatedRequestIds || [] } },
-                {
-                    service: { $in: affectedServices },
-                    timestamp: { $gte: windowStart, $lte: windowEnd }
-                }
-            ]
-        };
-
-        if (level && level !== 'ALL') {
-            query.level = level.toUpperCase();
-        }
-
-        if (search && search.trim()) {
-            const regex = new RegExp(search.trim(), 'i');
-            query.$and = [
-                { $or: query.$or },
-                {
-                    $or: [
-                        { message: regex },
-                        { route: regex },
-                        { requestId: regex },
-                        { traceId: regex }
-                    ]
-                }
-            ];
-            delete query.$or;
-        }
-
-        const pageNum = Math.max(1, parseInt(page, 10) || 1);
-        const limitNum = Math.max(1, Math.min(200, parseInt(limit, 10) || 50));
-        const skip = (pageNum - 1) * limitNum;
-
-        const [total, logs] = await Promise.all([
-            Log.countDocuments(query),
-            Log.find(query).sort({ timestamp: -1 }).skip(skip).limit(limitNum).lean()
-        ]);
-
-        const totalPages = Math.ceil(total / limitNum) || 1;
-
-        res.json({
-            success: true,
-            incidentId: incident.incidentId,
-            data: {
-                items: logs.map(l => sanitizeObject(l)),
-                total,
-                page: pageNum,
-                limit: limitNum,
-                totalPages,
-                hasNext: pageNum < totalPages
-            }
-        });
-    } catch (err) {
-        next(err);
-    }
-};
-
-// GET /api/incidents/:id/traces - Correlated distributed traces with waterfall details
-exports.getIncidentTraces = async (req, res, next) => {
-    try {
-        const { id } = req.params;
-        const incident = await findIncident(id);
-        if (!incident) {
-            return res.status(404).json({ success: false, message: 'Incident not found' });
-        }
-
-        const traceIds = incident.relatedTraceIds || [];
-        const formattedTraces = [];
-
-        for (const traceId of traceIds.slice(0, 10)) {
-            try {
-                const jaegerRes = await fetchJaeger(`/api/traces/${encodeURIComponent(traceId)}`);
-                if (jaegerRes && Array.isArray(jaegerRes.data) && jaegerRes.data.length > 0) {
-                    const detail = formatTraceDetail(jaegerRes.data[0]);
-                    if (detail) {
-                        formattedTraces.push(detail);
-                    }
-                }
-            } catch (_) {}
-        }
-
-        res.json({
-            success: true,
-            incidentId: incident.incidentId,
-            count: formattedTraces.length,
-            data: formattedTraces
-        });
-    } catch (err) {
-        next(err);
-    }
-};
-
-// GET /api/incidents/:id/metrics - Correlated metrics summary (before, during, after)
-exports.getIncidentMetrics = async (req, res, next) => {
-    try {
-        const { id } = req.params;
-        const incident = await findIncident(id);
-        if (!incident) {
-            return res.status(404).json({ success: false, message: 'Incident not found' });
-        }
-
-        if (!incident.investigationSummary || !incident.investigationSummary.metricsSummary) {
-            const correlated = await correlateIncidentEvidence(incident);
-            return res.json({
-                success: true,
-                incidentId: incident.incidentId,
-                data: correlated.investigation.metricsSummary
-            });
-        }
-
-        res.json({
-            success: true,
-            incidentId: incident.incidentId,
-            data: incident.investigationSummary.metricsSummary
         });
     } catch (err) {
         next(err);

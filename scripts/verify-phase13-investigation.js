@@ -114,25 +114,22 @@ async function getIncidentEvidence(incidentId) {
     return await res.json();
 }
 
-async function getIncidentLogs(incidentId, level = 'ALL') {
-    const res = await fetch(`${INTELLITRACE_URL}/incidents/${incidentId}/logs?level=${level}`, {
+async function getIncidentLogs(incidentId) {
+    return await fetch(`${INTELLITRACE_URL}/incidents/${incidentId}/logs`, {
         headers: { 'Authorization': `Bearer ${authToken}` }
     });
-    return await res.json();
 }
 
 async function getIncidentTraces(incidentId) {
-    const res = await fetch(`${INTELLITRACE_URL}/incidents/${incidentId}/traces`, {
+    return await fetch(`${INTELLITRACE_URL}/incidents/${incidentId}/traces`, {
         headers: { 'Authorization': `Bearer ${authToken}` }
     });
-    return await res.json();
 }
 
 async function getIncidentMetrics(incidentId) {
-    const res = await fetch(`${INTELLITRACE_URL}/incidents/${incidentId}/metrics`, {
+    return await fetch(`${INTELLITRACE_URL}/incidents/${incidentId}/metrics`, {
         headers: { 'Authorization': `Bearer ${authToken}` }
     });
-    return await res.json();
 }
 
 async function getIncidentDependencies(incidentId) {
@@ -198,26 +195,33 @@ async function runVerification() {
         // Test Evidence Endpoint
         const evdRes = await getIncidentEvidence(inc.incidentId);
 
-        // Test Logs Endpoint
-        const logsRes = await getIncidentLogs(inc.incidentId, 'ERROR');
+        // Verify removed endpoint returns 404
+        const logsRouteRes = await getIncidentLogs(inc.incidentId);
+        const logsRouteRemoved = logsRouteRes.status === 404;
+
+        // Verify shared logs endpoint still retains telemetry
+        const globalLogsRes = await fetch(`${INTELLITRACE_URL}/v1/logs?application=payment-service&level=ERROR`, {
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        const globalLogs = await globalLogsRes.json();
 
         const hasActualError = actualError && (actualError.errorType.includes('500') || actualError.errorMessage.includes('500'));
         const hasEvidence = evdRes.data?.length > 0;
-        const hasLogs = logsRes.data?.items?.length > 0;
-        const hasConfirmedObs = inv?.confirmedObservations?.length > 0;
+        const hasConfirmedObs = (inv?.confirmedObservations?.length > 0) || (inv?.confirmedFindings?.length > 0);
 
-        if (hasActualError && hasEvidence && hasConfirmedObs) {
+        if (hasActualError && hasEvidence && hasConfirmedObs && logsRouteRemoved) {
             recordResult('SCENARIO 1: HTTP 500 Error Extraction & Correlation', 'PASS', {
                 incidentId: inc.incidentId,
                 errorType: actualError.errorType,
                 errorMessage: actualError.errorMessage,
                 sourceFile: actualError.sourceFile,
                 evidenceCount: evdRes.data.length,
-                logsCount: logsRes.data.items.length,
-                confirmedObservations: inv.confirmedObservations
+                removedLogsRouteStatus: logsRouteRes.status,
+                globalTelemetryLogsCount: globalLogs?.data?.items?.length || 0,
+                confirmedObservations: inv.confirmedObservations || inv.confirmedFindings
             });
         } else {
-            recordResult('SCENARIO 1: HTTP 500 Error Extraction & Correlation', 'FAIL', { invRes, evdRes });
+            recordResult('SCENARIO 1: HTTP 500 Error Extraction & Correlation', 'FAIL', { invRes, evdRes, logsRouteStatus: logsRouteRes.status });
         }
     } catch (err) {
         recordResult('SCENARIO 1: HTTP 500 Error Extraction & Correlation', 'FAIL', { error: err.message });
@@ -254,21 +258,22 @@ async function runVerification() {
 
         const invRes = await getIncidentInvestigation(inc.incidentId);
         const inv = invRes.data?.investigation;
-        const metricsRes = await getIncidentMetrics(inc.incidentId);
+        const metricsRouteRes = await getIncidentMetrics(inc.incidentId);
+        const metricsRouteRemoved = metricsRouteRes.status === 404;
 
         const latencyReported = inv?.metricsSummary?.avgLatencyMs || inc.evidence?.avgLatencyMs;
         const noFabricatedStack = !inv?.actualError?.stackTrace; // Latency without crash should NOT fabricate a stack trace!
 
-        if (latencyReported && noFabricatedStack) {
+        if (latencyReported && noFabricatedStack && metricsRouteRemoved) {
             recordResult('SCENARIO 2: High Latency Slow Operation Correlation', 'PASS', {
                 incidentId: inc.incidentId,
                 avgLatency: latencyReported,
                 noFabricatedStack,
-                suspectedExplanations: inv.suspectedExplanations,
-                metricsSummary: metricsRes.data
+                removedMetricsRouteStatus: metricsRouteRes.status,
+                suspectedExplanations: inv.suspectedExplanations || inv.suspectedCauses
             });
         } else {
-            recordResult('SCENARIO 2: High Latency Slow Operation Correlation', 'FAIL', { latencyReported, noFabricatedStack });
+            recordResult('SCENARIO 2: High Latency Slow Operation Correlation', 'FAIL', { latencyReported, noFabricatedStack, metricsRouteStatus: metricsRouteRes.status });
         }
     } catch (err) {
         recordResult('SCENARIO 2: High Latency Slow Operation Correlation', 'FAIL', { error: err.message });
@@ -415,7 +420,6 @@ async function runVerification() {
 
         const invRes = await getIncidentInvestigation(inc.incidentId);
         const inv = invRes.data?.investigation;
-        const metricsRes = await getIncidentMetrics(inc.incidentId);
 
         const hasRequestRate = !!inv?.metricsSummary?.requestRatePerSec;
 
@@ -625,36 +629,106 @@ async function runVerification() {
         const unauthRes = await fetch(`${INTELLITRACE_URL}/incidents/${testInc.incidentId}/investigation`);
         const is401 = unauthRes.status === 401;
 
-        // Test all 6 investigation endpoints with auth
-        const [inv, evd, logs, traces, metrics, deps] = await Promise.all([
+        // Test retained investigation endpoints with auth (must return 200)
+        const [invRes, evdRes, depsRes] = await Promise.all([
             fetch(`${INTELLITRACE_URL}/incidents/${testInc.incidentId}/investigation`, { headers: { 'Authorization': `Bearer ${authToken}` } }),
             fetch(`${INTELLITRACE_URL}/incidents/${testInc.incidentId}/evidence`, { headers: { 'Authorization': `Bearer ${authToken}` } }),
-            fetch(`${INTELLITRACE_URL}/incidents/${testInc.incidentId}/logs`, { headers: { 'Authorization': `Bearer ${authToken}` } }),
-            fetch(`${INTELLITRACE_URL}/incidents/${testInc.incidentId}/traces`, { headers: { 'Authorization': `Bearer ${authToken}` } }),
-            fetch(`${INTELLITRACE_URL}/incidents/${testInc.incidentId}/metrics`, { headers: { 'Authorization': `Bearer ${authToken}` } }),
             fetch(`${INTELLITRACE_URL}/incidents/${testInc.incidentId}/dependencies`, { headers: { 'Authorization': `Bearer ${authToken}` } })
         ]);
+        const retainedEndpoints200 = [invRes, evdRes, depsRes].every(r => r.status === 200);
 
-        const allEndpoints200 = [inv, evd, logs, traces, metrics, deps].every(r => r.status === 200);
+        // Test removed endpoints (must return 404)
+        const [logsRes, tracesRes, metricsRes] = await Promise.all([
+            fetch(`${INTELLITRACE_URL}/incidents/${testInc.incidentId}/logs`, { headers: { 'Authorization': `Bearer ${authToken}` } }),
+            fetch(`${INTELLITRACE_URL}/incidents/${testInc.incidentId}/traces`, { headers: { 'Authorization': `Bearer ${authToken}` } }),
+            fetch(`${INTELLITRACE_URL}/incidents/${testInc.incidentId}/metrics`, { headers: { 'Authorization': `Bearer ${authToken}` } })
+        ]);
+        const removedEndpoints404 = [logsRes, tracesRes, metricsRes].every(r => r.status === 404);
 
-        if (is401 && allEndpoints200) {
+        // Test preserved shared observability endpoints
+        const [sharedTraces, sharedLogs, sharedApps] = await Promise.all([
+            fetch(`${INTELLITRACE_URL}/traces?service=payment-service`, { headers: { 'Authorization': `Bearer ${authToken}` } }),
+            fetch(`${INTELLITRACE_URL}/v1/logs?application=payment-service`, { headers: { 'Authorization': `Bearer ${authToken}` } }),
+            fetch(`${INTELLITRACE_URL}/applications`, { headers: { 'Authorization': `Bearer ${authToken}` } })
+        ]);
+        const sharedEndpointsOk = [sharedTraces, sharedLogs, sharedApps].every(r => r.status === 200);
+
+        if (is401 && retainedEndpoints200 && removedEndpoints404 && sharedEndpointsOk) {
             recordResult('TEST 10: Investigation API Endpoints & Auth Enforcement', 'PASS', {
                 unauthenticatedReturns401: true,
-                endpointsVerified: [
+                retainedEndpoints200: [
                     'GET /api/incidents/:id/investigation',
                     'GET /api/incidents/:id/evidence',
-                    'GET /api/incidents/:id/logs',
-                    'GET /api/incidents/:id/traces',
-                    'GET /api/incidents/:id/metrics',
                     'GET /api/incidents/:id/dependencies'
                 ],
-                allStatus200: true
+                removedEndpoints404: [
+                    'GET /api/incidents/:id/logs (404)',
+                    'GET /api/incidents/:id/traces (404)',
+                    'GET /api/incidents/:id/metrics (404)'
+                ],
+                sharedEndpointsPreserved: [
+                    'GET /api/traces',
+                    'GET /api/v1/logs',
+                    'GET /api/applications'
+                ]
             });
         } else {
-            recordResult('TEST 10: Investigation API Endpoints & Auth Enforcement', 'FAIL', { is401, allEndpoints200 });
+            recordResult('TEST 10: Investigation API Endpoints & Auth Enforcement', 'FAIL', {
+                is401,
+                retainedStatuses: [invRes.status, evdRes.status, depsRes.status],
+                removedStatuses: [logsRes.status, tracesRes.status, metricsRes.status],
+                sharedStatuses: [sharedTraces.status, sharedLogs.status, sharedApps.status]
+            });
         }
     } catch (err) {
         recordResult('TEST 10: Investigation API Endpoints & Auth Enforcement', 'FAIL', { error: err.message });
+    }
+
+    // ---------------------------------------------------------------------
+    // ADDITIONAL TEST 11: Simplified 3-Section Data Contract
+    // ---------------------------------------------------------------------
+    console.log('\n--- TEST 11: Simplified 3-Section Data Contract ---');
+    try {
+        const incidentsRes = await getIncidents();
+        const testInc = incidentsRes.data?.[0];
+        if (!testInc) throw new Error('No incident found to test 3-section contract');
+
+        const invRes = await getIncidentInvestigation(testInc.incidentId);
+        const inv = invRes.data?.investigation;
+
+        // Section A: Overview & Evidence
+        const hasSectionA = !!(inv?.summaryText || invRes.data?.incident?.description) &&
+            Array.isArray(inv?.confirmedFindings || inv?.confirmedObservations);
+
+        // Section B: Actual Error
+        const hasSectionB = inv?.actualError && typeof inv.actualError === 'object';
+
+        // Section C: Dependencies
+        const hasSectionC = inv?.dependencies && Array.isArray(inv.dependencies.relevantDependencies);
+
+        if (hasSectionA && hasSectionB && hasSectionC) {
+            recordResult('TEST 11: Simplified 3-Section Data Contract', 'PASS', {
+                incidentId: testInc.incidentId,
+                sectionA_OverviewEvidence: {
+                    hasSummary: true,
+                    findingsCount: (inv.confirmedFindings || inv.confirmedObservations).length,
+                    suspectedCausesCount: (inv.suspectedCauses || inv.suspectedExplanations || []).length
+                },
+                sectionB_ActualError: {
+                    errorType: inv.actualError.errorType,
+                    hasErrorMessage: !!inv.actualError.errorMessage,
+                    sourceFile: inv.actualError.sourceFile
+                },
+                sectionC_Dependencies: {
+                    relevantDependenciesCount: inv.dependencies.relevantDependencies.length,
+                    databaseInvolved: inv.dependencies.databaseInvolved
+                }
+            });
+        } else {
+            recordResult('TEST 11: Simplified 3-Section Data Contract', 'FAIL', { hasSectionA, hasSectionB, hasSectionC, inv });
+        }
+    } catch (err) {
+        recordResult('TEST 11: Simplified 3-Section Data Contract', 'FAIL', { error: err.message });
     }
 
     // =========================================================================
@@ -677,3 +751,4 @@ async function runVerification() {
 runVerification().catch(err => {
     console.error('Test suite failed with unexpected error:', err);
 });
+
